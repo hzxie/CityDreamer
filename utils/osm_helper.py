@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-22 20:50:53
+# @Last Modified at: 2023-03-23 15:13:02
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -135,7 +135,8 @@ def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
         for member in members:
             way_id = member.get("ref")
             role = member.get("role")
-            relational_ways[way_id] = {"role": role}
+            relational_ways[way_id] = tags
+            relational_ways[way_id]["role"] = role
 
     for way in root.findall("way"):
         way_id = way.get("id")
@@ -148,7 +149,7 @@ def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
             }
             footprints[way_id]["tags"] = tags
             if way_id in relational_ways:
-                footprints[way_id]["tags"]["role"] = relational_ways[way_id]["role"]
+                footprints[way_id]["tags"].update(relational_ways[way_id])
 
     return footprints, footprint_nodes
 
@@ -223,7 +224,6 @@ def get_footprint_height_stat(footprints):
     for _, values in footprints.items():
         if "height" in values["tags"]:
             height.append(float(values["tags"]["height"]))
-
     return {"1/4": np.percentile(height, 25), "3/4": np.percentile(height, 75)}
 
 
@@ -237,17 +237,6 @@ def fix_missing_footprint_height(footprints, footprint_height_stat):
 
 
 def _get_missing_footprint_height(footprint_tags, footprint_height_stat):
-    if "role" in footprint_tags and footprint_tags["role"] == "inner":
-        return 0
-    elif "leisure" in footprint_tags and footprint_tags["leisure"] == "park":
-        return 5
-    elif "landuse" in footprint_tags and footprint_tags["landuse"] == "construction":
-        return 10
-    elif "building" in footprint_tags and footprint_tags["building"] == "roof":
-        return 0
-    elif "building:levels" in footprint_tags:
-        return int(footprint_tags["building:levels"]) * 4.26
-
     return int(
         np.random.uniform(footprint_height_stat["1/4"], footprint_height_stat["3/4"])
     )
@@ -263,22 +252,15 @@ def plot_highways(
             way_nodes.append(
                 ((node["x"] - xy_bounds["xmin"], node["y"] - xy_bounds["ymin"]))
             )
-        if "width" not in values:
-            print(_, values)
+        if values["width"] is None:
+            continue
+
         cv2.polylines(
             map_img,
             [np.int32(way_nodes)],
             isClosed=False,
             color=colormap(map_name, values),
-            thickness=math.floor(
-                (
-                    values["width"]
-                    if values["width"] is not None
-                    else _get_missing_highway_width(values)
-                )
-                / resolution
-                + 0.5
-            ),
+            thickness=math.floor(values["width"] / resolution + 0.5),
         )
     return map_img
 
@@ -293,10 +275,13 @@ def plot_footprints(
             way_nodes.append(
                 ((node["x"] - xy_bounds["xmin"], node["y"] - xy_bounds["ymin"]))
             )
-        cv2.fillPoly(
-            map_img,
-            [np.int32(way_nodes)],
-            color=colormap(map_name, values["tags"]),
-        )
+        # color is None for ignored footprints
+        color = colormap(map_name, values["tags"])
+        if color is not None:
+            cv2.fillPoly(
+                map_img,
+                [np.int32(way_nodes)],
+                color=color,
+            )
 
     return map_img
