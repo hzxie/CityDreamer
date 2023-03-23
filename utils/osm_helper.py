@@ -4,10 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-23 15:13:02
+# @Last Modified at: 2023-03-23 21:15:00
 # @Email:  root@haozhexie.com
 
 import cv2
+import logging
 import lxml.etree
 import math
 import numpy as np
@@ -61,6 +62,17 @@ def get_nodes_lng_lat(osm_file_path, nodes):
     return nodes
 
 
+def _is_interested_way(tags, interested_tags):
+    for it in interested_tags:
+        if type(it) == str:
+            if it in tags:
+                return True
+        elif type(it) == dict:
+            if it["k"] in tags and tags[it["k"]] in it["v"]:
+                return True
+    return False
+
+
 def get_highways(osm_file_path, highway_tags=[], highway_nodes=None):
     highways = {}
     if highway_nodes is None:
@@ -70,9 +82,9 @@ def get_highways(osm_file_path, highway_tags=[], highway_nodes=None):
     for way in root.findall("way"):
         way_id = way.get("id")
         tags = {tag.get("k"): tag.get("v") for tag in way.findall("tag")}
-        if not tags or "highway" not in tags:
-            continue
-        if "action" in tags and tags["action"] == "delete":
+        if not _is_interested_way(tags, highway_tags) or (
+            "action" in tags and tags["action"] == "delete"
+        ):
             continue
 
         _highway_nodes = [n.get("ref") for n in way.findall("nd")]
@@ -81,17 +93,17 @@ def get_highways(osm_file_path, highway_tags=[], highway_nodes=None):
 
         _get_width = lambda w: float("".join(c for c in w if c.isdigit()))
         highways[way_id] = {
-            "level": tags["highway"] if "highway" in tags else None,
-            "layer": tags["layer"] if "layer" in tags else 0,
-            "width": _get_width(tags["width"]) if "width" in tags else None,
             "nodes": _highway_nodes,
+            "tags": tags,
         }
-
+        # highways[way_id]["layer"] = tags["layer"] if "layer" in tags else 0
+        highways[way_id]["tags"]["width"] = (
+            _get_width(tags["width"]) if "width" in tags else None
+        )
         for hn in _highway_nodes:
             if hn not in highway_nodes:
-                highway_nodes[hn] = {"ways": []}
+                highway_nodes[hn] = {}
             highway_nodes[hn]["nid"] = hn
-            highway_nodes[hn]["ways"].append(way_id)
 
     return highways, highway_nodes
 
@@ -106,18 +118,6 @@ def _get_footprint_nodes(way, nodes):
     return _footprint_nodes
 
 
-def _is_interested_footprint(tags, footprint_tags):
-    for ft in footprint_tags:
-        if type(ft) == str:
-            if ft in tags:
-                return True
-        elif type(ft) == dict:
-            if ft["k"] in tags and tags[ft["k"]] in ft["v"]:
-                return True
-
-    return False
-
-
 def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
     footprints = {}
     if footprint_nodes is None:
@@ -128,7 +128,7 @@ def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
     for way in root.findall("relation"):
         members = way.findall("member")
         tags = {tag.get("k"): tag.get("v") for tag in way.findall("tag")}
-        if not _is_interested_footprint(tags, footprint_tags) or (
+        if not _is_interested_way(tags, footprint_tags) or (
             "action" in tags and tags["action"] == "delete"
         ):
             continue
@@ -143,11 +143,11 @@ def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
         tags = {tag.get("k"): tag.get("v") for tag in way.findall("tag")}
         if "action" in tags and tags["action"] == "delete":
             continue
-        if _is_interested_footprint(tags, footprint_tags) or way_id in relational_ways:
+        if _is_interested_way(tags, footprint_tags) or way_id in relational_ways:
             footprints[way_id] = {
                 "nodes": _get_footprint_nodes(way, footprint_nodes),
+                "tags": tags,
             }
-            footprints[way_id]["tags"] = tags
             if way_id in relational_ways:
                 footprints[way_id]["tags"].update(relational_ways[way_id])
 
@@ -189,32 +189,32 @@ def get_empty_map(xy_bounds):
             xy_bounds["ymax"] - xy_bounds["ymin"] + 1,
             xy_bounds["xmax"] - xy_bounds["xmin"] + 1,
         ),
-        dtype=np.uint8,
+        dtype=np.int16,
     )
     return map_img
 
 
 def fix_missing_highway_width(highways):
     for _, values in highways.items():
-        if "width" not in values or values["width"] is None:
-            values["width"] = _get_missing_highway_width(values)
+        if "width" not in values["tags"] or values["tags"]["width"] is None:
+            values["tags"]["width"] = _get_missing_highway_width(values["tags"])
     return highways
 
 
 def _get_missing_highway_width(highway_tags):
     highway_level = highway_tags["highway"] if "highway" in highway_tags else None
     if highway_level in ["motorway", "trunk"]:
-        return 8 * 4.65
+        return 4.65 * 7
     elif highway_level == "primary":
-        return 6 * 4.65
+        return 4.65 * 5
     elif highway_level == "secondary":
-        return 4 * 4.65
+        return 4.65 * 3
     # elif highway_level == "secondary_link":
-    #     return 4.65
+    #     return 5
     elif highway_level in ["motorway_link", "trunk_link", "primary_link"]:
-        return 2 * 4.65
+        return 4.65 * 2
     elif highway_level in ["tertiary", "service", "residential"]:
-        return 2 * 4.65
+        return 4.65 * 2
     else:
         return 4.65
 
@@ -252,15 +252,15 @@ def plot_highways(
             way_nodes.append(
                 ((node["x"] - xy_bounds["xmin"], node["y"] - xy_bounds["ymin"]))
             )
-        if values["width"] is None:
+        if values["tags"]["width"] is None:
             continue
 
         cv2.polylines(
             map_img,
             [np.int32(way_nodes)],
             isClosed=False,
-            color=colormap(map_name, values),
-            thickness=math.floor(values["width"] / resolution + 0.5),
+            color=colormap(map_name, values["tags"]),
+            thickness=math.floor(values["tags"]["width"] / resolution + 0.5),
         )
     return map_img
 

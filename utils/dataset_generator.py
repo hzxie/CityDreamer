@@ -4,10 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 18:26:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-23 15:21:33
+# @Last Modified at: 2023-03-23 22:00:23
 # @Email:  root@haozhexie.com
 
 import argparse
+import cv2
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
@@ -23,16 +24,16 @@ def get_highways_and_footprints(osm_file_path):
     highways, nodes = osm_helper.get_highways(
         osm_file_path,
         [
-            "trunk",
-            "trunk_link",
-            "primary",
-            "primary_link",
-            "secondary",
-            "secondary_link",
-            "tertiary",
-            "motorway",
-            "service",
-            "residential",
+            {"k": "highway", "v": "trunk"},
+            {"k": "highway", "v": "trunk_link"},
+            {"k": "highway", "v": "primary"},
+            {"k": "highway", "v": "primary_link"},
+            {"k": "highway", "v": "secondary"},
+            {"k": "highway", "v": "secondary_link"},
+            {"k": "highway", "v": "tertiary"},
+            {"k": "highway", "v": "motorway"},
+            {"k": "highway", "v": "service"},
+            {"k": "highway", "v": "residential"},
         ],
     )
     footprints, nodes = osm_helper.get_footprints(
@@ -44,56 +45,68 @@ def get_highways_and_footprints(osm_file_path):
         ],
         nodes,
     )
+    coastlines, nodes = osm_helper.get_highways(
+        osm_file_path, [{"k": "natural", "v": "coastline"}], nodes
+    )
     nodes = osm_helper.get_nodes_lng_lat(osm_file_path, nodes)
-    return highways, footprints, nodes
+    return highways, footprints, coastlines, nodes
+
+
+def _tag_equals(tags, key, values=None):
+    if key not in tags:
+        return False
+    if values is None:
+        return True
+    return tags[key] in values
 
 
 def _get_highway_color(map_name, highway_tags):
     if map_name == "height_field":
         return 0
     elif map_name == "seg_map":
-        return 1
+        if _tag_equals(highway_tags, "natural", ["coastline"]):
+            return 5
+        else:
+            return 1
     else:
         raise Exception("Unknown map name: %s" % map_name)
 
 
 def _get_footprint_color(map_name, footprint_tags):
     if map_name == "height_field":
-        if "role" in footprint_tags and footprint_tags["role"] == "inner":
+        if _tag_equals(footprint_tags, "role", ["inner"]):
+            # "role" in footprint_tags and footprint_tags["role"] == "inner"
             return None
-        if "building:levels" in footprint_tags:
+        elif _tag_equals(footprint_tags, "building:levels"):
+            # "building:levels" in footprint_tags:
             return int(float(footprint_tags["building:levels"]) * 4.26)
-        elif "building" in footprint_tags and footprint_tags["building"] == "roof":
+        elif _tag_equals(footprint_tags, "building", ["roof"]):
+            #  "building" in footprint_tags and footprint_tags["building"] == "roof"
             return None
-        elif "leisure" in footprint_tags and footprint_tags["leisure"] in [
-            "park",
-            "grass",
-            "garden",
-        ]:
+        elif _tag_equals(footprint_tags, "leisure", ["park", "grass", "garden"]):
+            # "leisure" in footprint_tags and footprint_tags["leisure"] in [...]
             return 5
-        elif (
-            "landuse" in footprint_tags and footprint_tags["landuse"] == "construction"
-        ):
+        elif _tag_equals(footprint_tags, "landuse", ["construction"]):
+            #  "building" in footprint_tags and footprint_tags["building"] == "construction"
             return 10
         else:
             assert "height" in footprint_tags
             return int(float(footprint_tags["height"]) + 0.5)
     elif map_name == "seg_map":
-        if "role" in footprint_tags and footprint_tags["role"] == "inner":
+        if _tag_equals(footprint_tags, "role", ["inner"]):
             return 2
-        elif "building" in footprint_tags:
+        elif _tag_equals(footprint_tags, "building"):
             return 2
-        elif "leisure" in footprint_tags and footprint_tags["leisure"] in [
-            "park",
-            "grass",
-            "garden",
-        ]:
+        elif _tag_equals(footprint_tags, "leisure", ["park", "grass", "garden"]):
             return 3
-        elif (
-            "landuse" in footprint_tags and footprint_tags["landuse"] == "construction"
-        ):
+        elif _tag_equals(footprint_tags, "landuse", ["construction"]):
             return 4
-        elif "leisure" in footprint_tags and footprint_tags["leisure"] == "marina":
+        elif (
+            _tag_equals(footprint_tags, "waterway")
+            or _tag_equals(footprint_tags, "water")
+            or _tag_equals(footprint_tags, "natural", ["water"])
+            or _tag_equals(footprint_tags, "leisure", ["marina"])
+        ):
             return 5
         else:
             return 0
@@ -101,9 +114,25 @@ def _get_footprint_color(map_name, footprint_tags):
         raise Exception("Unknown map name: %s" % map_name)
 
 
+def get_coast_zones(coastlines, seg_map):
+    N_PIXELS_THRES = 1e5
+    coastlines = cv2.dilate((seg_map == 5).astype(np.uint8), np.ones((10, 10)))
+    seg_map[coastlines != 0] = 5
+    n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats((seg_map == 0).astype(np.uint8))
+    coast_zones = np.zeros_like(seg_map).astype(bool)
+    for i in range(n_labels):
+        if stats[i][-1] > N_PIXELS_THRES:
+            logging.debug("Mask[ID=%d] contains %d pixels." % (i, stats[i][-1]))
+            coast_zones[labels == i] = True
+
+    coast_zones[seg_map != 0] = False
+    coast_zones[coastlines != 0] = True
+    return coast_zones
+
+
 def get_osm_images(osm_file_path, zoom_level):
     logging.debug("Reading OSM files ...")
-    highways, footprints, nodes = get_highways_and_footprints(osm_file_path)
+    highways, footprints, coastlines, nodes = get_highways_and_footprints(osm_file_path)
 
     logging.debug("Converting lng/lat to X/Y coordinates ...")
     lnglat_bounds = {
@@ -113,11 +142,31 @@ def get_osm_images(osm_file_path, zoom_level):
     nodes = osm_helper.get_nodes_xy_coordinates(nodes, resolution, zoom_level)
     xy_bounds = osm_helper.get_xy_bounds(nodes)
 
-    # Fix missing height (for buildings) and width (for highways)
+    # Fix missing height (for buildings) and width (for highways and coastlines)
     highways = osm_helper.fix_missing_highway_width(highways)
+    coastlines = osm_helper.fix_missing_highway_width(coastlines)
     footprints = osm_helper.fix_missing_footprint_height(
         footprints, osm_helper.get_footprint_height_stat(footprints)
     )
+
+    # Generate semantic labels
+    seg_map = osm_helper.get_empty_map(xy_bounds)
+    seg_map = osm_helper.plot_highways(
+        "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
+    )
+    seg_map = osm_helper.plot_highways(
+        "seg_map", _get_highway_color, seg_map, coastlines, nodes, xy_bounds, resolution
+    )
+    seg_map = osm_helper.plot_footprints(
+        "seg_map",
+        _get_footprint_color,
+        seg_map,
+        footprints,
+        nodes,
+        xy_bounds,
+    )
+    coast_zones = get_coast_zones(coastlines, seg_map.copy())
+    seg_map[coast_zones] = 5
 
     # Generate height fields
     height_field = osm_helper.get_empty_map(xy_bounds)
@@ -129,25 +178,11 @@ def get_osm_images(osm_file_path, zoom_level):
         nodes,
         xy_bounds,
     )
-    ## TODO: Consider coastlines
+    # Make sure that all height values are above 0
+    height_field[coast_zones] = -5
     height_field += 5
-    # TODO: Remove normalization
-    # height_field = (height_field * resolution).astype(np.uint16)
-    height_field = (height_field / np.max(height_field) * 255).astype(np.uint8)
+    height_field = (height_field * resolution).astype(np.uint16)
 
-    # Generate semantic labels
-    seg_map = osm_helper.get_empty_map(xy_bounds)
-    seg_map = osm_helper.plot_highways(
-        "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
-    )
-    seg_map = osm_helper.plot_footprints(
-        "seg_map",
-        _get_footprint_color,
-        seg_map,
-        footprints,
-        nodes,
-        xy_bounds,
-    )
     return height_field, seg_map
 
 
@@ -189,8 +224,6 @@ def main(osm_dir, zoom_level):
             os.path.join(osm_dir, "%s-hf.png" % basename)
         )
         get_seg_map_img(seg_map).save(os.path.join(osm_dir, "%s-seg.png" % basename))
-        # TODO: Remove break
-        break
 
 
 if __name__ == "__main__":
