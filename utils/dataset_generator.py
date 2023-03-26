@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 18:26:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-23 22:00:23
+# @Last Modified at: 2023-03-26 19:01:08
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -118,7 +118,9 @@ def get_coast_zones(coastlines, seg_map):
     N_PIXELS_THRES = 1e5
     coastlines = cv2.dilate((seg_map == 5).astype(np.uint8), np.ones((10, 10)))
     seg_map[coastlines != 0] = 5
-    n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats((seg_map == 0).astype(np.uint8))
+    n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
+        (seg_map == 0).astype(np.uint8)
+    )
     coast_zones = np.zeros_like(seg_map).astype(bool)
     for i in range(n_labels):
         if stats[i][-1] > N_PIXELS_THRES:
@@ -167,6 +169,8 @@ def get_osm_images(osm_file_path, zoom_level):
     )
     coast_zones = get_coast_zones(coastlines, seg_map.copy())
     seg_map[coast_zones] = 5
+    # Assign ID=6 to unlabelled pixels (regarded as ground)
+    seg_map[seg_map == 0] = 6
 
     # Generate height fields
     height_field = osm_helper.get_empty_map(xy_bounds)
