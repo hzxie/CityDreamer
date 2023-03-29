@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-03-26 11:06:18
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-03-29 13:50:44
+ * @Last Modified at: 2023-03-29 18:11:19
  * @Email:  root@haozhexie.com
  */
 
@@ -58,10 +58,6 @@ torch::Tensor extrude_tensor_ext_cuda_forward(torch::Tensor seg_map,
       height, width, max_height, seg_map.data_ptr<int>(),
       height_field.data_ptr<int>(), volume.data_ptr<int>());
 
-  cudaError_t err = cudaGetLastError();
-  if (err != cudaSuccess) {
-    printf("Error in extrude_tensor_ext_cuda_forward: %s\n",
-           cudaGetErrorString(err));
-  }
+  TORCH_CHECK(cudaGetLastError());
   return volume;
 }

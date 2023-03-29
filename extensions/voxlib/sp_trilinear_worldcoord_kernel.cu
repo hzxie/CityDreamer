@@ -478,7 +478,7 @@ torch::Tensor sp_trilinear_worldcoord_cuda(const torch::Tensor &in_feature,
                                          in_feature.data_ptr<float>(),
                                          in_corner_lut.data_ptr<int32_t>(),
                                          in_worldcoord.data_ptr<float>(), p);
-  THCudaCheck(cudaGetLastError());
+  TORCH_CHECK(cudaGetLastError());
   return out_feature;
 }
 
@@ -574,6 +574,6 @@ std::vector<torch::Tensor> sp_trilinear_worldcoord_backward_cuda(
                                            in_worldcoord.data_ptr<float>(), p);
   }
 
-  THCudaCheck(cudaGetLastError());
+  TORCH_CHECK(cudaGetLastError());
   return {in_feature_grad};
 }

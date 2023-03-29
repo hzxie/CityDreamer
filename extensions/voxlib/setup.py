@@ -10,6 +10,7 @@ nvcc_args = []
 
 setup(
     name="voxrender",
+    version="1.0.0",
     ext_modules=[
         CUDAExtension(
             "voxlib",
