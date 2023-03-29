@@ -4,8 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-26 19:23:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-29 16:09:23
+# @Last Modified at: 2023-03-29 16:29:03
 # @Email:  root@haozhexie.com
+
+# Mayavi off screen rendering
+# Ref: https://github.com/enthought/mayavi/issues/477#issuecomment-477653210
+from xvfbwrapper import Xvfb
+vdisplay = Xvfb(width=1920, height=1080)
+vdisplay.start()
 
 import logging
 import mayavi.mlab
@@ -97,11 +103,12 @@ class ExtrudeTensorTestCase(unittest.TestCase):
         colors[vol[x, y, z] == 5] = [128, 0, 128, 255]
         colors[vol[x, y, z] == 6] = [0, 128, 128, 255]
 
+        mayavi.mlab.options.offscreen = True
         mayavi.mlab.figure(size=(1600, 900), bgcolor=(1, 1, 1))
         pts = mayavi.mlab.points3d(x, y, z, mode="cube", scale_factor=1)
         pts.glyph.scale_mode = "scale_by_vector"
         pts.mlab_source.dataset.point_data.scalars = colors
-        mayavi.mlab.show()
+        mayavi.mlab.savefig(os.path.join(osm_data_dir, "%s-3d.jpg" % osm_name))
 
 
 if __name__ == "__main__":
