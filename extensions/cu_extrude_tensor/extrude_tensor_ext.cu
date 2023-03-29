@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-03-26 11:06:18
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-03-26 19:19:57
+ * @Last Modified at: 2023-03-29 13:50:44
  * @Email:  root@haozhexie.com
  */
 
@@ -52,6 +52,11 @@ torch::Tensor extrude_tensor_ext_cuda_forward(torch::Tensor seg_map,
   int width = seg_map.size(3);
   torch::Tensor volume = torch::zeros({batch_size, height, width, max_height},
                                       torch::CUDA(torch::kInt));
+
+  extrude_tensor_ext_cuda_kernel<<<
+      batch_size, int(CUDA_NUM_THREADS / CUDA_NUM_THREADS), 0, stream>>>(
+      height, width, max_height, seg_map.data_ptr<int>(),
+      height_field.data_ptr<int>(), volume.data_ptr<int>());
 
   cudaError_t err = cudaGetLastError();
   if (err != cudaSuccess) {

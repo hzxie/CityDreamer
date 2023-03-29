@@ -1,5 +1,6 @@
 lxml
 matplotlib
+mayavi
 numpy
 opencv-python
 pillow
