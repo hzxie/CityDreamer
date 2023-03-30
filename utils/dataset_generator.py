@@ -4,24 +4,28 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 18:26:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-26 19:01:08
+# @Last Modified at: 2023-03-30 20:23:30
 # @Email:  root@haozhexie.com
 
 import argparse
 import cv2
+import json
 import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-
-import osm_helper
+import sys
 
 from tqdm import tqdm
 from PIL import Image
 
+PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
+sys.path.append(PROJECT_HOME)
+import utils.osm_helper
+
 
 def get_highways_and_footprints(osm_file_path):
-    highways, nodes = osm_helper.get_highways(
+    highways, nodes = utils.osm_helper.get_highways(
         osm_file_path,
         [
             {"k": "highway", "v": "trunk"},
@@ -36,7 +40,7 @@ def get_highways_and_footprints(osm_file_path):
             {"k": "highway", "v": "residential"},
         ],
     )
-    footprints, nodes = osm_helper.get_footprints(
+    footprints, nodes = utils.osm_helper.get_footprints(
         osm_file_path,
         [
             "building",
@@ -45,10 +49,10 @@ def get_highways_and_footprints(osm_file_path):
         ],
         nodes,
     )
-    coastlines, nodes = osm_helper.get_highways(
+    coastlines, nodes = utils.osm_helper.get_highways(
         osm_file_path, [{"k": "natural", "v": "coastline"}], nodes
     )
-    nodes = osm_helper.get_nodes_lng_lat(osm_file_path, nodes)
+    nodes = utils.osm_helper.get_nodes_lng_lat(osm_file_path, nodes)
     return highways, footprints, coastlines, nodes
 
 
@@ -138,28 +142,29 @@ def get_osm_images(osm_file_path, zoom_level):
 
     logging.debug("Converting lng/lat to X/Y coordinates ...")
     lnglat_bounds = {
-        k: float(v) for k, v in osm_helper.get_lnglat_bounds(osm_file_path).items()
+        k: float(v)
+        for k, v in utils.osm_helper.get_lnglat_bounds(osm_file_path).items()
     }
-    resolution = osm_helper.get_map_resolution(lnglat_bounds, zoom_level)
-    nodes = osm_helper.get_nodes_xy_coordinates(nodes, resolution, zoom_level)
-    xy_bounds = osm_helper.get_xy_bounds(nodes)
+    resolution = utils.osm_helper.get_map_resolution(lnglat_bounds, zoom_level)
+    nodes = utils.osm_helper.get_nodes_xy_coordinates(nodes, resolution, zoom_level)
+    xy_bounds = utils.osm_helper.get_xy_bounds(nodes)
 
     # Fix missing height (for buildings) and width (for highways and coastlines)
-    highways = osm_helper.fix_missing_highway_width(highways)
-    coastlines = osm_helper.fix_missing_highway_width(coastlines)
-    footprints = osm_helper.fix_missing_footprint_height(
-        footprints, osm_helper.get_footprint_height_stat(footprints)
+    highways = utils.osm_helper.fix_missing_highway_width(highways)
+    coastlines = utils.osm_helper.fix_missing_highway_width(coastlines)
+    footprints = utils.osm_helper.fix_missing_footprint_height(
+        footprints, utils.osm_helper.get_footprint_height_stat(footprints)
     )
 
     # Generate semantic labels
-    seg_map = osm_helper.get_empty_map(xy_bounds)
-    seg_map = osm_helper.plot_highways(
+    seg_map = utils.osm_helper.get_empty_map(xy_bounds)
+    seg_map = utils.osm_helper.plot_highways(
         "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
     )
-    seg_map = osm_helper.plot_highways(
+    seg_map = utils.osm_helper.plot_highways(
         "seg_map", _get_highway_color, seg_map, coastlines, nodes, xy_bounds, resolution
     )
-    seg_map = osm_helper.plot_footprints(
+    seg_map = utils.osm_helper.plot_footprints(
         "seg_map",
         _get_footprint_color,
         seg_map,
@@ -173,8 +178,8 @@ def get_osm_images(osm_file_path, zoom_level):
     seg_map[seg_map == 0] = 6
 
     # Generate height fields
-    height_field = osm_helper.get_empty_map(xy_bounds)
-    height_field = osm_helper.plot_footprints(
+    height_field = utils.osm_helper.get_empty_map(xy_bounds)
+    height_field = utils.osm_helper.plot_footprints(
         "height_field",
         _get_footprint_color,
         height_field,
@@ -187,7 +192,7 @@ def get_osm_images(osm_file_path, zoom_level):
     height_field += 5
     height_field = (height_field * resolution).astype(np.uint16)
 
-    return height_field, seg_map
+    return height_field, seg_map, {"resolution": resolution, "bounds": xy_bounds}
 
 
 def get_seg_map_img(seg_map):
@@ -217,17 +222,109 @@ def get_seg_map_img(seg_map):
     return seg_map
 
 
-def main(osm_dir, zoom_level):
-    osm_files = os.listdir(osm_dir)
-    for of in tqdm(osm_files):
-        basename, suffix = os.path.splitext(of)
-        if suffix != ".osm":
-            continue
-        height_field, seg_map = get_osm_images(os.path.join(osm_dir, of), zoom_level)
-        Image.fromarray(height_field).save(
-            os.path.join(osm_dir, "%s-hf.png" % basename)
+def get_google_earth_project_name(osm_basename, google_earth_dir):
+    ge_projects = os.listdir(google_earth_dir)
+    osm_info = osm_basename.split("-")
+    osm_country, osm_city = osm_info[0], osm_info[1]
+    for gp in ge_projects:
+        if gp.startswith("%s-%s" % (osm_country, osm_city)):
+            return gp
+    return None
+
+
+def get_google_earth_camera_poses(ge_proj_name, ge_dir):
+    ge_proj_dir = os.path.join(ge_dir, ge_proj_name)
+    camera_setting_file = os.path.join(ge_proj_dir, "%s.json" % ge_proj_name)
+    ge_project_file = os.path.join(ge_proj_dir, "%s.esp" % ge_proj_name)
+    if not os.path.exists(camera_setting_file) or not os.path.exists(ge_project_file):
+        return None
+
+    camera_settings = None
+    with open(camera_setting_file) as f:
+        camera_settings = json.loads(f.read())
+
+    camera_target = None
+    with open(ge_project_file) as f:
+        ge_proj_settings = json.loads(f.read())
+        scene = ge_proj_settings["scenes"][0]["attributes"]
+        camera_group = next(
+            _attr["attributes"] for _attr in scene if _attr["type"] == "cameraGroup"
         )
-        get_seg_map_img(seg_map).save(os.path.join(osm_dir, "%s-seg.png" % basename))
+        camera_taget_effect = next(
+            _attr["attributes"]
+            for _attr in camera_group
+            if _attr["type"] == "cameraTargetEffect"
+        )
+        camera_target = next(
+            _attr["attributes"]
+            for _attr in camera_taget_effect
+            if _attr["type"] == "poi"
+        )
+
+    camera_poses = {
+        "vfov": camera_settings["cameraFrames"][0]["fovVertical"],
+        "width": camera_settings["width"],
+        "height": camera_settings["height"],
+        "center": {
+            "coordinate": {
+                "longitude": next(
+                    _attr["value"]["relative"]
+                    for _attr in camera_target
+                    if _attr["type"] == "longitudePOI"
+                )
+                * 360
+                - 180,
+                "latitude": next(
+                    _attr["value"]["relative"]
+                    for _attr in camera_target
+                    if _attr["type"] == "latitudePOI"
+                )
+                * 180
+                - 90,
+            }
+        },
+        "poses": [],
+    }
+    for cf in camera_settings["cameraFrames"]:
+        camera_poses["poses"].append(
+            {"rotation": cf["rotation"], "coordinate": cf["coordinate"]}
+        )
+    return camera_poses
+
+
+def main(osm_dir, google_earth_dir, zoom_level):
+    osm_files = [f for f in os.listdir(osm_dir) if f.endswith(".osm")]
+    for of in tqdm(osm_files):
+        basename, _ = os.path.splitext(of)
+        # Create folder for the OSM
+        _osm_dir = os.path.join(osm_dir, basename)
+        os.makedirs(_osm_dir, exist_ok=True)
+        # Rasterisation
+        height_field, seg_map, metadata = get_osm_images(
+            os.path.join(osm_dir, of), zoom_level
+        )
+        Image.fromarray(height_field).save(os.path.join(_osm_dir, "hf.png"))
+        get_seg_map_img(seg_map).save(os.path.join(_osm_dir, "seg.png"))
+        # Align with Google Earth Studio
+        _ge_proj_name = get_google_earth_project_name(basename, google_earth_dir)
+        if _ge_proj_name is None:
+            logging.warning(
+                "No matching Google Earth Project found for OSM[File=%s]." % of
+            )
+            continue
+        ge_camera_poses = get_google_earth_camera_poses(_ge_proj_name, google_earth_dir)
+        for gcp in ge_camera_poses["poses"]:
+            x, y = utils.osm_helper.lnglat2xy(
+                gcp["coordinate"]["longitude"],
+                gcp["coordinate"]["latitude"],
+                metadata["resolution"],
+                zoom_level,
+            )
+            gcp["position"] = {
+                "x": x - metadata["bounds"]["xmin"],
+                "y": y - metadata["bounds"]["ymin"],
+                "z": gcp["coordinate"]["altitude"],
+            }
 
 
 if __name__ == "__main__":
@@ -237,7 +334,8 @@ if __name__ == "__main__":
         level=logging.INFO,
     )
     parser = argparse.ArgumentParser()
-    parser.add_argument("--osm_dir", dest="osm_dir", default="../data/osm")
-    parser.add_argument("--zoom", dest="zoom", default=18)
+    parser.add_argument("--osm_dir", default=os.path.join(PROJECT_HOME, "data", "osm"))
+    parser.add_argument("--ges_dir", default=os.path.join(PROJECT_HOME, "data", "ges"))
+    parser.add_argument("--zoom", default=18)
     args = parser.parse_args()
-    main(args.osm_dir, args.zoom)
+    main(args.osm_dir, args.ges_dir, args.zoom)

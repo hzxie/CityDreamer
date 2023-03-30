@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-23 21:15:00
+# @Last Modified at: 2023-03-30 20:06:15
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -148,6 +148,16 @@ def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
                 "nodes": _get_footprint_nodes(way, footprint_nodes),
                 "tags": tags,
             }
+            if "height" in tags:
+                try:
+                    tags["height"] = float(tags["height"])
+                except:
+                    logging.warning(
+                        "Invalid height value %s for Footprint[ID=%s]"
+                        % (tags["height"], way_id)
+                    )
+                    del tags["height"]
+
             if way_id in relational_ways:
                 footprints[way_id]["tags"].update(relational_ways[way_id])
 
@@ -165,11 +175,11 @@ def get_map_resolution(lnglat_bounds, zoom_level):
     )
 
 
-def _lnglat2xy(lng, lat, resolution, zoom_level, tile_size=256):
+def lnglat2xy(lng, lat, resolution, zoom_level, tile_size=256):
     n = 2.0**zoom_level
     x = (lng + 180.0) / 360.0 * n * tile_size
     y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n * tile_size
-    return (int(int(x) * resolution), int(int(y) * resolution))
+    return (int(x * resolution), int(y * resolution))
 
 
 def get_nodes_xy_coordinates(nodes, resolution, zoom_level):
@@ -177,7 +187,7 @@ def get_nodes_xy_coordinates(nodes, resolution, zoom_level):
         if "lng" not in values or "lat" not in values:
             logging.warning("Missing values for Node[ID=%s]" % values["nid"])
             continue
-        values["x"], values["y"] = _lnglat2xy(
+        values["x"], values["y"] = lnglat2xy(
             values["lng"], values["lat"], resolution, zoom_level
         )
     return nodes

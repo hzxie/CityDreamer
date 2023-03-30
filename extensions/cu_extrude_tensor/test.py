@@ -10,6 +10,7 @@
 # Mayavi off screen rendering
 # Ref: https://github.com/enthought/mayavi/issues/477#issuecomment-477653210
 from xvfbwrapper import Xvfb
+
 vdisplay = Xvfb(width=1920, height=1080)
 vdisplay.start()
 
