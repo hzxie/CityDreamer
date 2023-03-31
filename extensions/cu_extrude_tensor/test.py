@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-26 19:23:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-29 16:29:03
+# @Last Modified at: 2023-03-31 15:35:07
 # @Email:  root@haozhexie.com
 
 # Mayavi off screen rendering
@@ -67,21 +67,20 @@ class ExtrudeTensorTestCase(unittest.TestCase):
             os.path.dirname(__file__), os.path.pardir, os.path.pardir
         )
         osm_data_dir = os.path.join(proj_home_dir, "data", "osm")
-        osm_name = "NewYork-4km"
-        seg_map = Image.open(
-            os.path.join(osm_data_dir, "%s-seg.png" % osm_name)
-        ).convert("P")
-        height_field = Image.open(os.path.join(osm_data_dir, "%s-hf.png" % osm_name))
-
+        osm_name = "US-NewYork-32km"
+        seg_map = Image.open(os.path.join(osm_data_dir, osm_name, "seg.png")).convert(
+            "P"
+        )
+        height_field = Image.open(os.path.join(osm_data_dir, osm_name, "hf.png"))
+        # Crop the maps
+        seg_map = np.array(seg_map)[1000:1256, 1000:1256]
+        height_field = np.array(height_field)[1000:1256, 1000:1256]
+        # Convert to tensors
         seg_map_tnsr = (
-            torch.from_numpy(np.array(seg_map))
-            .unsqueeze(dim=0)
-            .int()
-            .unsqueeze(dim=0)
-            .cuda()
+            torch.from_numpy(seg_map).unsqueeze(dim=0).unsqueeze(dim=0).int().cuda()
         )
         height_field_tnsr = (
-            torch.from_numpy(np.array(height_field))
+            torch.from_numpy(height_field)
             .unsqueeze(dim=0)
             .unsqueeze(dim=0)
             .int()
@@ -92,7 +91,6 @@ class ExtrudeTensorTestCase(unittest.TestCase):
         )
         # 3D Visualization
         vol = volume.squeeze().cpu().numpy().astype(np.uint8)
-        vol = vol[1000:1250, 1000:1250]
 
         x, y, z = np.where(vol != 0)
         n_pts = len(x)

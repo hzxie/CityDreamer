@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-30 20:06:15
+# @Last Modified at: 2023-03-31 13:52:04
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -179,7 +179,7 @@ def lnglat2xy(lng, lat, resolution, zoom_level, tile_size=256):
     n = 2.0**zoom_level
     x = (lng + 180.0) / 360.0 * n * tile_size
     y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n * tile_size
-    return (int(x * resolution), int(y * resolution))
+    return (int(x * resolution + 0.5), int(y * resolution + 0.5))
 
 
 def get_nodes_xy_coordinates(nodes, resolution, zoom_level):

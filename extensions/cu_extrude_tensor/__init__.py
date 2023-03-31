@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-24 20:24:38
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-26 19:36:53
+# @Last Modified at: 2023-03-31 13:54:28
 # @Email:  root@haozhexie.com
 
 import torch
@@ -12,9 +12,9 @@ import torch
 import extrude_tensor_ext
 
 
-class ExtrudeTensor(torch.nn.Module):
+class TensorExtruder(torch.nn.Module):
     def __init__(self, max_height=256):
-        super(ExtrudeTensor, self).__init__()
+        super(TensorExtruder, self).__init__()
         self.max_height = max_height
 
     def forward(self, seg_map, height_field):
