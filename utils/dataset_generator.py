@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 18:26:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-31 16:35:10
+# @Last Modified at: 2023-03-31 19:52:29
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -474,8 +474,14 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
                 zoom_level,
             )
             gcp["position"] = {
-                "x": x - metadata["bounds"]["xmin"],
-                "y": y - metadata["bounds"]["ymin"],
+                "x": x
+                - metadata["bounds"]["xmin"]
+                - ge_camera_poses["center"]["position"]["x"]
+                + patch_size,
+                "y": y
+                - metadata["bounds"]["ymin"]
+                - ge_camera_poses["center"]["position"]["y"]
+                + patch_size,
                 "z": gcp["coordinate"]["altitude"],
             }
             # Ref: https://github.com/city-super/BungeeNeRF/blob/26cc7f4c848e20961dbf067114faa4268034349e/GES2pose.py#L94-L96
@@ -488,6 +494,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
                 "y": cm_theta_lc[1],
                 "z": cm_theta_lc[2],
             }
+            logging.debug("Camera parameters: %s" % gcp)
             ## Run ray-voxel intersection
             r"""Ray-voxel intersection CUDA kernel.
             Note: voxel_id = 0 and depth2 = NaN if there is no intersection along the ray
@@ -536,15 +543,15 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
                 os.path.join(ges_seg_dir, "%s-%04d.png" % (_ge_proj_name, idx))
             )
             # Debug
-            print(torch.sum(torch.sum(voxel_id)))
-            break
+            if idx >= 100:
+                break
 
 
 if __name__ == "__main__":
     plt.rcParams["figure.figsize"] = (48, 30)
     logging.basicConfig(
         format="[%(levelname)s] %(asctime)s %(message)s",
-        level=logging.INFO,
+        level=logging.DEBUG,
     )
     parser = argparse.ArgumentParser()
     parser.add_argument("--osm_dir", default=os.path.join(PROJECT_HOME, "data", "osm"))
