@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 18:26:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-31 19:52:29
+# @Last Modified at: 2023-04-01 15:07:45
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -286,91 +286,24 @@ def get_google_earth_camera_poses(ge_proj_name, ge_dir):
                 )
                 * 180
                 - 90,
+                # IMPORTANT NOTE: All Google Earth renderings are focused on an altitude of one.
+                "altitude": next(
+                    _attr["value"]["relative"]
+                    for _attr in camera_target
+                    if _attr["type"] == "altitudePOI"
+                )
+                + 1,
             }
         },
         "poses": [],
     }
     for cf in camera_settings["cameraFrames"]:
         camera_poses["poses"].append(
-            {"rotation": cf["rotation"], "coordinate": cf["coordinate"]}
+            # Note: Rotation is no longer needed now
+            # {"rotation": cf["rotation"], "coordinate": cf["coordinate"]}
+            {"coordinate": cf["coordinate"]}
         )
     return camera_poses
-
-
-def get_rotation_matrix_local_cord(center_lng, center_lat):
-    return np.array(
-        [
-            [-math.sin(center_lng), math.cos(center_lng), 0],
-            [
-                -math.sin(center_lat) * math.cos(center_lng),
-                -math.sin(center_lat) * math.sin(center_lng),
-                math.cos(center_lat),
-            ],
-            [
-                math.cos(center_lat) * math.cos(center_lng),
-                math.cos(center_lat) * math.sin(center_lng),
-                math.sin(center_lat),
-            ],
-        ]
-    )
-
-
-def _is_rotation_matrix(r):
-    r_t = np.transpose(r)
-    should_be_identity = np.dot(r_t, r)
-    I = np.identity(3, dtype=r.dtype)
-    n = np.linalg.norm(I - should_be_identity)
-    return n < 1e-6
-
-
-def _euler_angles_to_rotation_matrix(theta):
-    rx = np.array(
-        [
-            [1, 0, 0],
-            [0, math.cos(theta[0]), -math.sin(theta[0])],
-            [0, math.sin(theta[0]), math.cos(theta[0])],
-        ]
-    )
-    ry = np.array(
-        [
-            [math.cos(theta[1]), 0, math.sin(theta[1])],
-            [0, 1, 0],
-            [-math.sin(theta[1]), 0, math.cos(theta[1])],
-        ]
-    )
-    rz = np.array(
-        [
-            [math.cos(theta[2]), -math.sin(theta[2]), 0],
-            [math.sin(theta[2]), math.cos(theta[2]), 0],
-            [0, 0, 1],
-        ]
-    )
-    return np.dot(rz, np.dot(ry, rx))
-
-
-def _rotation_matrix_to_euler_angles(r):
-    sy = math.sqrt(r[0, 0] * r[0, 0] + r[1, 0] * r[1, 0])
-    singular = sy < 1e-6
-    if not singular:
-        x = math.atan2(r[2, 1], r[2, 2])
-        y = math.atan2(-r[2, 0], sy)
-        z = math.atan2(r[1, 0], r[0, 0])
-    else:
-        x = math.atan2(-r[1, 2], r[1, 1])
-        y = math.atan2(-r[2, 0], sy)
-        z = 0
-
-    return (x, y, z)
-
-
-def get_euler_angles_local_cord(theta_wc, rot_mtx_lc):
-    # Ref:
-    # - http://eecs.qmul.ac.uk/~gslabaugh/publications/euler.pdf
-    # - https://learnopencv.com/rotation-matrix-to-euler-angles/
-    cm_r_wc = _euler_angles_to_rotation_matrix(theta_wc)
-    cm_rot_mat = np.dot(np.linalg.inv(cm_r_wc), rot_mtx_lc)
-    assert _is_rotation_matrix(cm_rot_mat)
-    return _rotation_matrix_to_euler_angles(cm_rot_mat)
 
 
 def _get_img_patch_tensor(img, cx, cy, patch_size):
@@ -420,6 +353,9 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
             ge_camera_poses["height"] / 2 / np.tan(np.deg2rad(ge_camera_poses["vfov"]))
         )
         ## Build semantic 3D volume
+        logging.debug(
+            "Camera Target Center: %s" % ge_camera_poses["center"]["coordinate"]
+        )
         cx, cy = utils.osm_helper.lnglat2xy(
             ge_camera_poses["center"]["coordinate"]["longitude"],
             ge_camera_poses["center"]["coordinate"]["latitude"],
@@ -429,6 +365,8 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
         ge_camera_poses["center"]["position"] = {
             "x": cx - metadata["bounds"]["xmin"],
             "y": cy - metadata["bounds"]["ymin"],
+            "z": ge_camera_poses["center"]["coordinate"]["altitude"]
+            * metadata["resolution"],
         }
         logging.debug(
             "Map Information: Center=%s; Size(HxW): %s"
@@ -440,30 +378,23 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
                 ),
             )
         )
-        seg_volume = (
-            tensor_extruder(
-                _get_img_patch_tensor(
-                    seg_map,
-                    ge_camera_poses["center"]["position"]["x"],
-                    ge_camera_poses["center"]["position"]["y"],
-                    patch_size,
-                ),
-                _get_img_patch_tensor(
-                    height_field,
-                    ge_camera_poses["center"]["position"]["x"],
-                    ge_camera_poses["center"]["position"]["y"],
-                    patch_size,
-                ),
-            )
-            .squeeze()
-            .permute(2, 0, 1)
-        )
+        seg_volume = tensor_extruder(
+            _get_img_patch_tensor(
+                seg_map,
+                ge_camera_poses["center"]["position"]["x"],
+                ge_camera_poses["center"]["position"]["y"],
+                patch_size,
+            ),
+            _get_img_patch_tensor(
+                height_field,
+                ge_camera_poses["center"]["position"]["x"],
+                ge_camera_poses["center"]["position"]["y"],
+                patch_size,
+            ),
+        ).squeeze()
         logging.debug("The shape of SegVolume: %s" % (seg_volume.size(),))
-        ## Convert camera poses to the local coordinate system
-        rot_mtx_cvt_lc = get_rotation_matrix_local_cord(
-            ge_camera_poses["center"]["coordinate"]["longitude"],
-            ge_camera_poses["center"]["coordinate"]["latitude"],
-        )
+        ## Convert camera position to the voxel coordinate system
+        vol_cx, vol_cy, vol_cz = (patch_size - 1) // 2, (patch_size - 1) // 2, 0
         for idx, gcp in enumerate(
             tqdm(ge_camera_poses["poses"], desc="Project: %s" % _ge_proj_name)
         ):
@@ -477,29 +408,20 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
                 "x": x
                 - metadata["bounds"]["xmin"]
                 - ge_camera_poses["center"]["position"]["x"]
-                + patch_size,
+                + vol_cx,
                 "y": y
                 - metadata["bounds"]["ymin"]
                 - ge_camera_poses["center"]["position"]["y"]
-                + patch_size,
-                "z": gcp["coordinate"]["altitude"],
+                + vol_cy,
+                "z": gcp["coordinate"]["altitude"] * metadata["resolution"]
+                - ge_camera_poses["center"]["position"]["z"],
             }
-            # Ref: https://github.com/city-super/BungeeNeRF/blob/26cc7f4c848e20961dbf067114faa4268034349e/GES2pose.py#L94-L96
-            _x = math.radians(-gcp["rotation"]["x"])
-            _y = math.radians(180 - gcp["rotation"]["y"])
-            _z = math.radians(180 + gcp["rotation"]["z"])
-            cm_theta_lc = get_euler_angles_local_cord((_x, _y, _z), rot_mtx_cvt_lc)
-            gcp["rotation"] = {
-                "x": cm_theta_lc[0],
-                "y": cm_theta_lc[1],
-                "z": cm_theta_lc[2],
-            }
-            logging.debug("Camera parameters: %s" % gcp)
+            # logging.debug("Camera parameters: %s" % gcp)
             ## Run ray-voxel intersection
             r"""Ray-voxel intersection CUDA kernel.
             Note: voxel_id = 0 and depth2 = NaN if there is no intersection along the ray
             Args:
-                voxel_t (height x size x size tensor, int32): Full 3D voxel of MC block IDs.
+                voxel_t (H x W x D tensor, int32): Full 3D voxel of MC block IDs.
                 cam_ori_t (3 tensor): Camera origin.
                 cam_dir_t (3 tensor): Camera direction.
                 cam_up_t (3 tensor): Camera up vector.
@@ -519,37 +441,39 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
             voxel_id, depth2, raydirs = voxlib.ray_voxel_intersection_perspective(
                 seg_volume,
                 torch.tensor(
-                    [gcp["position"]["x"], gcp["position"]["y"], gcp["position"]["z"]],
+                    [gcp["position"]["y"], gcp["position"]["x"], gcp["position"]["z"]],
                     dtype=torch.float32,
                 ),
                 torch.tensor(
-                    [gcp["rotation"]["x"], gcp["rotation"]["y"], gcp["rotation"]["z"]],
+                    [
+                        vol_cy - gcp["position"]["y"],
+                        vol_cx - gcp["position"]["x"],
+                        vol_cz - gcp["position"]["z"],
+                    ],
                     dtype=torch.float32,
                 ),
-                torch.tensor([1, 0, 0], dtype=torch.float32),
+                torch.tensor([0, 0, 1], dtype=torch.float32),
                 ge_camera_focal,
                 [
-                    (ge_camera_poses["width"] - 1) / 2.0,
                     (ge_camera_poses["height"] - 1) / 2.0,
+                    (ge_camera_poses["width"] - 1) / 2.0,
                 ],
                 [ge_camera_poses["height"], ge_camera_poses["width"]],
                 N_MAX_SAMPLES,
             )
             # print(voxel_id.size())    # torch.Size([540, 960, 10, 1])
-            ## Generate the corresponding segmentation images
+            # Generate the corresponding segmentation images
             ges_seg_dir = os.path.join(google_earth_dir, _ge_proj_name, "seg")
             os.makedirs(ges_seg_dir, exist_ok=True)
             get_seg_map_img(voxel_id.squeeze()[..., 0].cpu().numpy()).save(
                 os.path.join(ges_seg_dir, "%s-%04d.png" % (_ge_proj_name, idx))
             )
-            # Debug
-            if idx >= 100:
-                break
 
 
 if __name__ == "__main__":
     plt.rcParams["figure.figsize"] = (48, 30)
     logging.basicConfig(
+        # filename=os.path.join(PROJECT_HOME, "logs", "dataset-generate.log")
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.DEBUG,
     )
