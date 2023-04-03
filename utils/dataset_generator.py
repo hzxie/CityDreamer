@@ -2,9 +2,9 @@
 #
 # @File:   dataset_generator.py
 # @Author: Haozhe Xie
-# @Date:   2023-03-21 18:26:26
+# @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-01 15:07:45
+# @Last Modified at: 2023-04-03 22:14:53
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -106,7 +106,9 @@ def _get_footprint_color(map_name, footprint_tags):
             return 2
         elif _tag_equals(footprint_tags, "building"):
             return 2
-        elif _tag_equals(footprint_tags, "leisure", ["park", "grass", "garden"]):
+        elif _tag_equals(
+            footprint_tags, "leisure", ["park", "grass", "garden"]
+        ) or _tag_equals(footprint_tags, "landuse", ["forest"]):
             return 3
         elif _tag_equals(footprint_tags, "landuse", ["construction"]):
             return 4
@@ -142,7 +144,7 @@ def get_coast_zones(coastlines, seg_map):
 
 
 def get_osm_images(osm_file_path, zoom_level):
-    logging.debug("Reading OSM files ...")
+    logging.debug("Reading OSM file[Path=%s] ..." % osm_file_path)
     highways, footprints, coastlines, nodes = get_highways_and_footprints(osm_file_path)
 
     logging.debug("Converting lng/lat to X/Y coordinates ...")
@@ -162,13 +164,8 @@ def get_osm_images(osm_file_path, zoom_level):
     )
 
     # Generate semantic labels
+    # Plot footprint before highway to make highway more smooth
     seg_map = utils.osm_helper.get_empty_map(xy_bounds)
-    seg_map = utils.osm_helper.plot_highways(
-        "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
-    )
-    seg_map = utils.osm_helper.plot_highways(
-        "seg_map", _get_highway_color, seg_map, coastlines, nodes, xy_bounds, resolution
-    )
     seg_map = utils.osm_helper.plot_footprints(
         "seg_map",
         _get_footprint_color,
@@ -177,8 +174,15 @@ def get_osm_images(osm_file_path, zoom_level):
         nodes,
         xy_bounds,
     )
-    coast_zones = get_coast_zones(coastlines, seg_map.copy())
-    seg_map[coast_zones] = 5
+    seg_map = utils.osm_helper.plot_highways(
+        "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
+    )
+    seg_map = utils.osm_helper.plot_highways(
+        "seg_map", _get_highway_color, seg_map, coastlines, nodes, xy_bounds, resolution
+    )
+    # TODO: Fix coast zones
+    # coast_zones = get_coast_zones(coastlines, seg_map.copy())
+    # seg_map[coast_zones] = 5
     # Assign ID=6 to unlabelled pixels (regarded as ground)
     seg_map[seg_map == 0] = 6
 
@@ -193,7 +197,7 @@ def get_osm_images(osm_file_path, zoom_level):
         xy_bounds,
     )
     # Make sure that all height values are above 0
-    height_field[coast_zones] = -5
+    # height_field[coast_zones] = -5
     height_field += 5
     height_field = (height_field * resolution).astype(np.uint16)
 
@@ -202,26 +206,19 @@ def get_osm_images(osm_file_path, zoom_level):
 
 def get_seg_map_img(seg_map):
     PALETTE = np.array([[i, i, i] for i in range(256)])
-    PALETTE[:16] = np.array(
+    # fmt: off
+    PALETTE[:7] = np.array(
         [
-            [0, 0, 0],
-            [128, 0, 0],
-            [0, 128, 0],
-            [128, 128, 0],
-            [0, 0, 128],
-            [128, 0, 128],
-            [0, 128, 128],
-            [128, 128, 128],
-            [64, 0, 0],
-            [191, 0, 0],
-            [64, 128, 0],
-            [191, 128, 0],
-            [64, 0, 128],
-            [191, 0, 128],
-            [64, 128, 128],
-            [191, 128, 128],
+            [0, 0, 0],       # empty        -> black (ONLY used in voxel)
+            [96, 0, 0],      # highway      -> red
+            [96, 96, 0],     # building     -> yellow
+            [0, 96, 0],      # garden       -> green
+            [0, 96, 96],     # construction -> cyan
+            [0, 0, 96],      # water        -> blue
+            [128, 128, 128], # ground       -> gray
         ]
     )
+    # fmt: on
     seg_map = Image.fromarray(seg_map.astype(np.uint8))
     seg_map.putpalette(PALETTE.reshape(-1).tolist())
     return seg_map
@@ -327,7 +324,7 @@ def _get_img_patch_tensor(img, cx, cy, patch_size):
 
 
 def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
-    osm_files = [f for f in os.listdir(osm_dir) if f.endswith(".osm")]
+    osm_files = sorted([f for f in os.listdir(osm_dir) if f.endswith(".osm")])
     tensor_extruder = TensorExtruder(max_height)
     for of in tqdm(osm_files):
         basename, _ = os.path.splitext(of)
@@ -473,7 +470,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
 if __name__ == "__main__":
     plt.rcParams["figure.figsize"] = (48, 30)
     logging.basicConfig(
-        # filename=os.path.join(PROJECT_HOME, "logs", "dataset-generate.log")
+        filename=os.path.join(PROJECT_HOME, "logs", "dataset-generator.log"),
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.DEBUG,
     )

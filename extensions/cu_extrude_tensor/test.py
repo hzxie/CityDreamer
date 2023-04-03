@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-26 19:23:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-31 15:35:07
+# @Last Modified at: 2023-04-02 11:40:34
 # @Email:  root@haozhexie.com
 
 # Mayavi off screen rendering
@@ -67,7 +67,7 @@ class ExtrudeTensorTestCase(unittest.TestCase):
             os.path.dirname(__file__), os.path.pardir, os.path.pardir
         )
         osm_data_dir = os.path.join(proj_home_dir, "data", "osm")
-        osm_name = "US-NewYork-32km"
+        osm_name = "US-NewYork"
         seg_map = Image.open(os.path.join(osm_data_dir, osm_name, "seg.png")).convert(
             "P"
         )

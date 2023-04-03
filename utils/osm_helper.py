@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-03-31 13:52:04
+# @Last Modified at: 2023-04-03 22:13:30
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -12,6 +12,7 @@ import logging
 import lxml.etree
 import math
 import numpy as np
+import re
 
 
 def get_lnglat_bounds(xml_file_path):
@@ -91,15 +92,12 @@ def get_highways(osm_file_path, highway_tags=[], highway_nodes=None):
         if not _highway_nodes:
             continue
 
-        _get_width = lambda w: float("".join(c for c in w if c.isdigit()))
         highways[way_id] = {
             "nodes": _highway_nodes,
             "tags": tags,
         }
         # highways[way_id]["layer"] = tags["layer"] if "layer" in tags else 0
-        highways[way_id]["tags"]["width"] = (
-            _get_width(tags["width"]) if "width" in tags else None
-        )
+        highways[way_id]["tags"] = _get_numeric_tag_values(tags, [("width", 40)])
         for hn in _highway_nodes:
             if hn not in highway_nodes:
                 highway_nodes[hn] = {}
@@ -116,6 +114,57 @@ def _get_footprint_nodes(way, nodes):
                 nodes[node_id] = {"nid": node_id}
 
     return _footprint_nodes
+
+
+def _is_numeric(value):
+    try:
+        float(value)
+    except:
+        return False
+
+    return True
+
+
+def _get_numeric_values(key, value, max_value):
+    if _is_numeric(value):
+        return float(value)
+
+    new_value = None
+    values = None
+    # Check whether the expression uses feet and inch
+    if re.match("^[0-9]+'([0-9]+\")?$", value):
+        feet = re.search("[0-9]+'", value)
+        inch = re.search('[0-9]+"', value)
+        feet = feet.group()[:-1] if feet else 0
+        inch = inch.group()[:-1] if inch else 0
+        new_value = int(feet) * 0.3048 + int(inch) * 0.0254
+        # logging.debug("Origin: %s, Feet: %s, Inch: %s" % (value, feet, inch))
+    elif re.match("^[0-9]+(\s)*f(ee)?t$", value):
+        new_value = int(re.match("[0-9]+", value).group()) * 0.3048
+    else:
+        # Extract values from string
+        values = [
+            float(v.group())
+            for v in re.finditer("[0-9]+(\.[0-9]+)?", value)
+            if _is_numeric(v.group())
+        ]
+        new_value = sum(values) / len(values) if values else None
+    logging.debug(
+        "Value changed for %s: %s -> %s (%s)" % (key, value, new_value, values)
+    )
+    return new_value if new_value is not None and new_value < max_value else None
+
+
+def _get_numeric_tag_values(tags, keys=[]):
+    for key, max_v in keys:
+        if key in tags:
+            new_value = _get_numeric_values(key, tags[key], max_v)
+            if new_value is None:
+                logging.warning("Invalid value: %s for %s" % (tags[key], key))
+                del tags[key]
+            else:
+                tags[key] = new_value
+    return tags
 
 
 def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
@@ -148,18 +197,17 @@ def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
                 "nodes": _get_footprint_nodes(way, footprint_nodes),
                 "tags": tags,
             }
-            if "height" in tags:
-                try:
-                    tags["height"] = float(tags["height"])
-                except:
-                    logging.warning(
-                        "Invalid height value %s for Footprint[ID=%s]"
-                        % (tags["height"], way_id)
-                    )
-                    del tags["height"]
-
+            tags = _get_numeric_tag_values(
+                tags, keys=[("height", 750), ("building:levels", 150)]
+            )
             if way_id in relational_ways:
-                footprints[way_id]["tags"].update(relational_ways[way_id])
+                _tags = _get_numeric_tag_values(
+                    relational_ways[way_id],
+                    keys=[("height", 750), ("building:levels", 150)],
+                )
+                for k, v in _tags.items():
+                    if k not in footprints[way_id]["tags"]:
+                        footprints[way_id]["tags"][k] = v
 
     return footprints, footprint_nodes
 
@@ -213,20 +261,22 @@ def fix_missing_highway_width(highways):
 
 def _get_missing_highway_width(highway_tags):
     highway_level = highway_tags["highway"] if "highway" in highway_tags else None
-    if highway_level in ["motorway", "trunk"]:
-        return 4.65 * 7
+    if highway_level == "motorway":
+        return 4.5 * 8
+    if highway_level == "trunk":
+        return 4.5 * 6
     elif highway_level == "primary":
-        return 4.65 * 5
+        return 4.5 * 4
     elif highway_level == "secondary":
-        return 4.65 * 3
-    # elif highway_level == "secondary_link":
-    #     return 5
+        return 4.5 * 2
+    elif highway_level == "secondary_link":
+        return 4.5
     elif highway_level in ["motorway_link", "trunk_link", "primary_link"]:
-        return 4.65 * 2
+        return 4.5
     elif highway_level in ["tertiary", "service", "residential"]:
-        return 4.65 * 2
+        return 4.5
     else:
-        return 4.65
+        return 4.5
 
 
 def get_footprint_height_stat(footprints):
