@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-26 19:23:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-04 18:58:20
+# @Last Modified at: 2023-04-04 20:27:56
 # @Email:  root@haozhexie.com
 
 # Mayavi off screen rendering
@@ -102,7 +102,7 @@ class ExtrudeTensorTestCase(unittest.TestCase):
         # fmt: off
         colors[vol[x, y, z] == 1] = [96, 0, 0, 255]         # highway      -> red
         colors[vol[x, y, z] == 2] = [96, 96, 0, 255]        # building     -> yellow
-        colors[vol[x, y, z] == 3] = [0, 96, 0, 255]         # garden       -> green
+        colors[vol[x, y, z] == 3] = [0, 96, 0, 255]         # green lands  -> green
         colors[vol[x, y, z] == 4] = [0, 96, 96, 255]        # construction -> cyan
         colors[vol[x, y, z] == 5] = [0, 0, 96, 255]         # water        -> blue
         colors[vol[x, y, z] == 6] = [128, 128, 128, 255]    # ground       -> gray

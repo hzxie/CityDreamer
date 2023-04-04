@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-04 20:10:03
+# @Last Modified at: 2023-04-04 20:43:37
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -49,12 +49,7 @@ def get_highways_and_footprints(osm_file_path):
         osm_file_path,
         [
             "building",
-            {
-                "k": "landuse",
-                "v": ["cemetery", "construction", "forest"],
-            },
-            {"k": "leisure", "v": ["garden", "grass", "park", "marina"]},
-            {"k": "natural", "v": ["scrub", "wood", "wetland"]},
+            {"k": "landuse", "v": ["construction"]},
         ],
         nodes,
     )
@@ -91,9 +86,6 @@ def _get_footprint_color(map_name, footprint_tags):
         elif _tag_equals(footprint_tags, "building", ["roof"]):
             #  "building" in footprint_tags and footprint_tags["building"] == "roof"
             return None
-        elif _tag_equals(footprint_tags, "leisure", ["park", "grass", "garden"]):
-            # "leisure" in footprint_tags and footprint_tags["leisure"] in [...]
-            return 5
         elif _tag_equals(footprint_tags, "landuse", ["construction"]):
             #  "building" in footprint_tags and footprint_tags["building"] == "construction"
             return 10
@@ -105,18 +97,8 @@ def _get_footprint_color(map_name, footprint_tags):
             return 2
         elif _tag_equals(footprint_tags, "building"):
             return 2
-        elif (
-            _tag_equals(footprint_tags, "leisure", ["garden", "grass", "park"])
-            or _tag_equals(footprint_tags, "landuse", ["cemetery", "forest"])
-            or _tag_equals(footprint_tags, "natural", ["scrub", "wood", "wetland"])
-        ):
-            return 3
         elif _tag_equals(footprint_tags, "landuse", ["construction"]):
             return 4
-        elif _tag_equals(footprint_tags, "water") or _tag_equals(
-            footprint_tags, "natural", ["water"]
-        ):
-            return 5
         else:
             return 0
     else:
@@ -127,12 +109,20 @@ def get_coast_zones(osm_tile_img_path, img_size):
     tile_img = cv2.imread(osm_tile_img_path)
     water_lb = np.array([219, 219, 195], dtype=np.uint8)
     water_ub = np.array([235, 235, 219], dtype=np.uint8)
-    return (
-        cv2.resize(
-            cv2.inRange(tile_img, water_lb, water_ub), (img_size[1], img_size[0])
-        )
-        != 0
+    return cv2.resize(cv2.inRange(tile_img, water_lb, water_ub), img_size[::-1]) != 0
+
+
+def get_green_lands(osm_tile_img_path, seg_map):
+    tile_img = cv2.imread(osm_tile_img_path)
+    green_lb = np.array([211, 217, 217], dtype=np.uint8)
+    green_ub = np.array([215, 236, 225], dtype=np.uint8)
+    # Only assign green lands to uncategoried pixels
+    uncategoried = np.zeros_like(seg_map)
+    uncategoried[seg_map == 0] = True
+    green_lands = cv2.resize(
+        cv2.inRange(tile_img, green_lb, green_ub), seg_map.shape[::-1]
     )
+    return (green_lands != 0) * uncategoried
 
 
 def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
@@ -169,14 +159,18 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         xy_bounds,
     )
     # Read coast zones from the no-label tile image
+    coast_zones = None
+    green_lands = None
     if not os.path.exists(osm_tile_img_path):
         logging.warning(
             "The coast zones for the OSM[Path=%s] could not be parsed due to a missing tile image[Path=%s]"
             % (osm_file_path, osm_tile_img_path)
         )
     else:
+        green_lands = get_green_lands(osm_tile_img_path, seg_map)
+        seg_map[green_lands != 0] = 3
         coast_zones = get_coast_zones(osm_tile_img_path, seg_map.shape)
-        seg_map[coast_zones] = 5
+        seg_map[coast_zones != 0] = 5
     # Assign ID=6 to unlabelled pixels (regarded as ground)
     seg_map[seg_map == 0] = 6
 
@@ -199,9 +193,14 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         xy_bounds,
         resolution,
     )
+    if coast_zones is not None:
+        height_field[coast_zones] = -5
+    if green_lands is not None:
+        height_field[green_lands] = 5
+
     # Make sure that all height values are above 0
-    # height_field[coast_zones] = -5
     height_field += 5
+    # Normalize the height values of the image with the same scale as the width and height dimensions
     height_field = (height_field * resolution).astype(np.uint16)
 
     return height_field, seg_map, {"resolution": resolution, "bounds": xy_bounds}
@@ -215,7 +214,7 @@ def get_seg_map_img(seg_map):
             [0, 0, 0],       # empty        -> black (ONLY used in voxel)
             [96, 0, 0],      # highway      -> red
             [96, 96, 0],     # building     -> yellow
-            [0, 96, 0],      # garden       -> green
+            [0, 96, 0],      # green lands  -> green
             [0, 96, 96],     # construction -> cyan
             [0, 0, 96],      # water        -> blue
             [128, 128, 128], # ground       -> gray
