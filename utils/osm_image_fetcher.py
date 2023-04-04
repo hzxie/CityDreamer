@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-04 14:46:29
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-04 19:31:16
+# @Last Modified at: 2023-04-04 20:44:45
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -126,13 +126,13 @@ def main(osm_dir, zoom_level):
         }
         logging.debug("TL Offset: %s; BR Offset: %s" % (tl_offset, br_offset))
         assert (
-            tl_offset["x"] < 256
+            tl_offset["x"] <= 256
             and tl_offset["x"] >= 0
-            and tl_offset["y"] < 256
+            and tl_offset["y"] <= 256
             and tl_offset["y"] >= 0
-            and br_offset["x"] > -256
+            and br_offset["x"] >= -256
             and br_offset["x"] <= 0
-            and br_offset["y"] > -256
+            and br_offset["y"] >= -256
             and br_offset["y"] <= 0
         )
         osm_img = osm_img[
