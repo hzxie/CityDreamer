@@ -4,13 +4,12 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-04 14:46:29
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-04 18:57:54
+# @Last Modified at: 2023-04-04 19:31:16
 # @Email:  root@haozhexie.com
 
 import argparse
 import cv2
 import logging
-import math
 import numpy as np
 import os
 import requests
@@ -29,15 +28,18 @@ import utils.osm_helper
 
 def get_tile_img(zoom, x, y):
     WORK_DIR = "/tmp/osm-image-fetcher"
-    url = "https://tile.openstreetmap.org/%d/%d/%d.png" % (zoom, x, y)
+    url = (
+        "https://a.basemaps.cartocdn.com/rastertiles/voyager_nolabels/%d/%d/%d.png"
+        % (zoom, x, y)
+    )
     img_file_path = os.path.join(WORK_DIR, "z%d-x%d-y%d.png" % (zoom, x, y))
     os.makedirs(WORK_DIR, exist_ok=True)
+    response = None
     if not os.path.exists(img_file_path):
         try:
             session = requests.Session()
             session.headers.update(
                 {
-                    "referer": "https://www.openstreetmap.org/",
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/111.0.0.0 Safari/537.36",
                 }
             )
