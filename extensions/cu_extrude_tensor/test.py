@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-26 19:23:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-02 11:40:34
+# @Last Modified at: 2023-04-04 18:58:20
 # @Email:  root@haozhexie.com
 
 # Mayavi off screen rendering
@@ -31,6 +31,10 @@ sys.path.append(
     )
 )
 from extensions.cu_extrude_tensor import ExtrudeTensorFunction
+
+# Disable the warning message for PIL decompression bomb
+# Ref: https://stackoverflow.com/questions/25705773/image-cropping-tool-python
+Image.MAX_IMAGE_PIXELS = None
 
 
 class ExtrudeTensorTestCase(unittest.TestCase):
@@ -73,8 +77,8 @@ class ExtrudeTensorTestCase(unittest.TestCase):
         )
         height_field = Image.open(os.path.join(osm_data_dir, osm_name, "hf.png"))
         # Crop the maps
-        seg_map = np.array(seg_map)[1000:1256, 1000:1256]
-        height_field = np.array(height_field)[1000:1256, 1000:1256]
+        seg_map = np.array(seg_map)[3840:4096, 3840:4096]
+        height_field = np.array(height_field)[3840:4096, 3840:4096]
         # Convert to tensors
         seg_map_tnsr = (
             torch.from_numpy(seg_map).unsqueeze(dim=0).unsqueeze(dim=0).int().cuda()
@@ -95,19 +99,20 @@ class ExtrudeTensorTestCase(unittest.TestCase):
         x, y, z = np.where(vol != 0)
         n_pts = len(x)
         colors = np.zeros((n_pts, 4), dtype=np.uint8)
-        colors[vol[x, y, z] == 1] = [128, 0, 0, 255]
-        colors[vol[x, y, z] == 2] = [0, 128, 0, 255]
-        colors[vol[x, y, z] == 3] = [128, 128, 0, 255]
-        colors[vol[x, y, z] == 4] = [0, 0, 128, 255]
-        colors[vol[x, y, z] == 5] = [128, 0, 128, 255]
-        colors[vol[x, y, z] == 6] = [0, 128, 128, 255]
-
+        # fmt: off
+        colors[vol[x, y, z] == 1] = [96, 0, 0, 255]         # highway      -> red
+        colors[vol[x, y, z] == 2] = [96, 96, 0, 255]        # building     -> yellow
+        colors[vol[x, y, z] == 3] = [0, 96, 0, 255]         # garden       -> green
+        colors[vol[x, y, z] == 4] = [0, 96, 96, 255]        # construction -> cyan
+        colors[vol[x, y, z] == 5] = [0, 0, 96, 255]         # water        -> blue
+        colors[vol[x, y, z] == 6] = [128, 128, 128, 255]    # ground       -> gray
+        # fmt: on
         mayavi.mlab.options.offscreen = True
         mayavi.mlab.figure(size=(1600, 900), bgcolor=(1, 1, 1))
         pts = mayavi.mlab.points3d(x, y, z, mode="cube", scale_factor=1)
         pts.glyph.scale_mode = "scale_by_vector"
         pts.mlab_source.dataset.point_data.scalars = colors
-        mayavi.mlab.savefig(os.path.join(osm_data_dir, "%s-3d.jpg" % osm_name))
+        mayavi.mlab.savefig(os.path.join(proj_home_dir, "logs", "%s-3d.jpg" % osm_name))
 
 
 if __name__ == "__main__":

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-03 22:13:30
+# @Last Modified at: 2023-04-04 15:21:12
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -96,8 +96,9 @@ def get_highways(osm_file_path, highway_tags=[], highway_nodes=None):
             "nodes": _highway_nodes,
             "tags": tags,
         }
-        # highways[way_id]["layer"] = tags["layer"] if "layer" in tags else 0
-        highways[way_id]["tags"] = _get_numeric_tag_values(tags, [("width", 40)])
+        highways[way_id]["tags"] = _get_numeric_tag_values(
+            tags, [("width", 40), ("layer", 10)]
+        )
         for hn in _highway_nodes:
             if hn not in highway_nodes:
                 highway_nodes[hn] = {}
@@ -132,12 +133,12 @@ def _get_numeric_values(key, value, max_value):
     new_value = None
     values = None
     # Check whether the expression uses feet and inch
-    if re.match("^[0-9]+'([0-9]+\")?$", value):
-        feet = re.search("[0-9]+'", value)
-        inch = re.search('[0-9]+"', value)
+    if re.match("^([0-9]+(\.[0-9]+)?')?([0-9]+(\.[0-9]+)?\")?$", value):
+        feet = re.search("[0-9]+(\.[0-9]+)?'", value)
+        inch = re.search('[0-9]+(\.[0-9]+)?"', value)
         feet = feet.group()[:-1] if feet else 0
         inch = inch.group()[:-1] if inch else 0
-        new_value = int(feet) * 0.3048 + int(inch) * 0.0254
+        new_value = float(feet) * 0.3048 + float(inch) * 0.0254
         # logging.debug("Origin: %s, Feet: %s, Inch: %s" % (value, feet, inch))
     elif re.match("^[0-9]+(\s)*f(ee)?t$", value):
         new_value = int(re.match("[0-9]+", value).group()) * 0.3048
@@ -224,10 +225,11 @@ def get_map_resolution(lnglat_bounds, zoom_level):
 
 
 def lnglat2xy(lng, lat, resolution, zoom_level, tile_size=256):
+    # Ref: https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
     n = 2.0**zoom_level
     x = (lng + 180.0) / 360.0 * n * tile_size
     y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n * tile_size
-    return (int(x * resolution + 0.5), int(y * resolution + 0.5))
+    return (int(x * resolution), int(y * resolution))
 
 
 def get_nodes_xy_coordinates(nodes, resolution, zoom_level):

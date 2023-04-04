@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-03 22:14:53
+# @Last Modified at: 2023-04-04 20:10:03
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -49,16 +49,17 @@ def get_highways_and_footprints(osm_file_path):
         osm_file_path,
         [
             "building",
-            {"k": "landuse", "v": ["construction"]},
-            {"k": "leisure", "v": ["park", "marina"]},
+            {
+                "k": "landuse",
+                "v": ["cemetery", "construction", "forest"],
+            },
+            {"k": "leisure", "v": ["garden", "grass", "park", "marina"]},
+            {"k": "natural", "v": ["scrub", "wood", "wetland"]},
         ],
         nodes,
     )
-    coastlines, nodes = utils.osm_helper.get_highways(
-        osm_file_path, [{"k": "natural", "v": "coastline"}], nodes
-    )
     nodes = utils.osm_helper.get_nodes_lng_lat(osm_file_path, nodes)
-    return highways, footprints, coastlines, nodes
+    return highways, footprints, nodes
 
 
 def _tag_equals(tags, key, values=None):
@@ -73,10 +74,8 @@ def _get_highway_color(map_name, highway_tags):
     if map_name == "height_field":
         return 0
     elif map_name == "seg_map":
-        if _tag_equals(highway_tags, "natural", ["coastline"]):
-            return 5
-        else:
-            return 1
+        # Ignore underground highways
+        return 0 if "layer" in highway_tags and highway_tags["layer"] < 0 else 1
     else:
         raise Exception("Unknown map name: %s" % map_name)
 
@@ -106,17 +105,16 @@ def _get_footprint_color(map_name, footprint_tags):
             return 2
         elif _tag_equals(footprint_tags, "building"):
             return 2
-        elif _tag_equals(
-            footprint_tags, "leisure", ["park", "grass", "garden"]
-        ) or _tag_equals(footprint_tags, "landuse", ["forest"]):
+        elif (
+            _tag_equals(footprint_tags, "leisure", ["garden", "grass", "park"])
+            or _tag_equals(footprint_tags, "landuse", ["cemetery", "forest"])
+            or _tag_equals(footprint_tags, "natural", ["scrub", "wood", "wetland"])
+        ):
             return 3
         elif _tag_equals(footprint_tags, "landuse", ["construction"]):
             return 4
-        elif (
-            _tag_equals(footprint_tags, "waterway")
-            or _tag_equals(footprint_tags, "water")
-            or _tag_equals(footprint_tags, "natural", ["water"])
-            or _tag_equals(footprint_tags, "leisure", ["marina"])
+        elif _tag_equals(footprint_tags, "water") or _tag_equals(
+            footprint_tags, "natural", ["water"]
         ):
             return 5
         else:
@@ -125,27 +123,21 @@ def _get_footprint_color(map_name, footprint_tags):
         raise Exception("Unknown map name: %s" % map_name)
 
 
-def get_coast_zones(coastlines, seg_map):
-    N_PIXELS_THRES = 1e5
-    coastlines = cv2.dilate((seg_map == 5).astype(np.uint8), np.ones((10, 10)))
-    seg_map[coastlines != 0] = 5
-    n_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(
-        (seg_map == 0).astype(np.uint8)
+def get_coast_zones(osm_tile_img_path, img_size):
+    tile_img = cv2.imread(osm_tile_img_path)
+    water_lb = np.array([219, 219, 195], dtype=np.uint8)
+    water_ub = np.array([235, 235, 219], dtype=np.uint8)
+    return (
+        cv2.resize(
+            cv2.inRange(tile_img, water_lb, water_ub), (img_size[1], img_size[0])
+        )
+        != 0
     )
-    coast_zones = np.zeros_like(seg_map).astype(bool)
-    for i in range(n_labels):
-        if stats[i][-1] > N_PIXELS_THRES:
-            logging.debug("Mask[ID=%d] contains %d pixels." % (i, stats[i][-1]))
-            coast_zones[labels == i] = True
-
-    coast_zones[seg_map != 0] = False
-    coast_zones[coastlines != 0] = True
-    return coast_zones
 
 
-def get_osm_images(osm_file_path, zoom_level):
+def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     logging.debug("Reading OSM file[Path=%s] ..." % osm_file_path)
-    highways, footprints, coastlines, nodes = get_highways_and_footprints(osm_file_path)
+    highways, footprints, nodes = get_highways_and_footprints(osm_file_path)
 
     logging.debug("Converting lng/lat to X/Y coordinates ...")
     lnglat_bounds = {
@@ -156,9 +148,8 @@ def get_osm_images(osm_file_path, zoom_level):
     nodes = utils.osm_helper.get_nodes_xy_coordinates(nodes, resolution, zoom_level)
     xy_bounds = utils.osm_helper.get_xy_bounds(nodes)
 
-    # Fix missing height (for buildings) and width (for highways and coastlines)
+    # Fix missing height (for buildings) and width for highways
     highways = utils.osm_helper.fix_missing_highway_width(highways)
-    coastlines = utils.osm_helper.fix_missing_highway_width(coastlines)
     footprints = utils.osm_helper.fix_missing_footprint_height(
         footprints, utils.osm_helper.get_footprint_height_stat(footprints)
     )
@@ -166,6 +157,9 @@ def get_osm_images(osm_file_path, zoom_level):
     # Generate semantic labels
     # Plot footprint before highway to make highway more smooth
     seg_map = utils.osm_helper.get_empty_map(xy_bounds)
+    seg_map = utils.osm_helper.plot_highways(
+        "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
+    )
     seg_map = utils.osm_helper.plot_footprints(
         "seg_map",
         _get_footprint_color,
@@ -174,15 +168,15 @@ def get_osm_images(osm_file_path, zoom_level):
         nodes,
         xy_bounds,
     )
-    seg_map = utils.osm_helper.plot_highways(
-        "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
-    )
-    seg_map = utils.osm_helper.plot_highways(
-        "seg_map", _get_highway_color, seg_map, coastlines, nodes, xy_bounds, resolution
-    )
-    # TODO: Fix coast zones
-    # coast_zones = get_coast_zones(coastlines, seg_map.copy())
-    # seg_map[coast_zones] = 5
+    # Read coast zones from the no-label tile image
+    if not os.path.exists(osm_tile_img_path):
+        logging.warning(
+            "The coast zones for the OSM[Path=%s] could not be parsed due to a missing tile image[Path=%s]"
+            % (osm_file_path, osm_tile_img_path)
+        )
+    else:
+        coast_zones = get_coast_zones(osm_tile_img_path, seg_map.shape)
+        seg_map[coast_zones] = 5
     # Assign ID=6 to unlabelled pixels (regarded as ground)
     seg_map[seg_map == 0] = 6
 
@@ -195,6 +189,15 @@ def get_osm_images(osm_file_path, zoom_level):
         footprints,
         nodes,
         xy_bounds,
+    )
+    height_field = utils.osm_helper.plot_highways(
+        "height_field",
+        _get_highway_color,
+        height_field,
+        highways,
+        nodes,
+        xy_bounds,
+        resolution,
     )
     # Make sure that all height values are above 0
     # height_field[coast_zones] = -5
@@ -333,7 +336,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
         os.makedirs(_osm_dir, exist_ok=True)
         # Rasterisation
         height_field, seg_map, metadata = get_osm_images(
-            os.path.join(osm_dir, of), zoom_level
+            os.path.join(osm_dir, of), os.path.join(_osm_dir, "tiles.png"), zoom_level
         )
         Image.fromarray(height_field).save(os.path.join(_osm_dir, "hf.png"))
         get_seg_map_img(seg_map).save(os.path.join(_osm_dir, "seg.png"))
@@ -470,7 +473,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
 if __name__ == "__main__":
     plt.rcParams["figure.figsize"] = (48, 30)
     logging.basicConfig(
-        filename=os.path.join(PROJECT_HOME, "logs", "dataset-generator.log"),
+        # filename=os.path.join(PROJECT_HOME, "logs", "dataset-generator.log"),
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.DEBUG,
     )
