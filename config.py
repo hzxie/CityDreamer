@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 20:54:57
+# @Last Modified at: 2023-04-05 21:30:25
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict as edict
@@ -59,7 +59,7 @@ __C.NETWORK.VQGAN.N_RES_BLOCKS                   = 2
 __C.NETWORK.VQGAN.N_CHANNEL_BASE                 = 128
 __C.NETWORK.VQGAN.N_CHANNEL_FACTORS              = [1, 1, 2, 2, 4, 4]
 __C.NETWORK.VQGAN.RESOLUTION                     = 512
-__C.NETWORK.VQGAN.ATTN_RESOLUTION                = 16
+__C.NETWORK.VQGAN.ATTN_RESOLUTION                = [16]
 __C.NETWORK.VQGAN.N_EMBED                        = 512
 __C.NETWORK.VQGAN.EMBED_DIM                      = 512
 __C.NETWORK.VQGAN.Z_CHANNELS                     = 256

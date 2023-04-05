@@ -4,8 +4,9 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:09:04
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 21:22:57
+# @Last Modified at: 2023-04-05 21:40:06
 # @Email:  root@haozhexie.com
+# @Ref: https://github.com/CompVis/taming-transformers
 
 import einops
 import logging
@@ -33,8 +34,21 @@ class VQVAE(torch.nn.Module):
             cfg.NETWORK.VQGAN.EMBED_DIM, cfg.NETWORK.VQGAN.Z_CHANNELS, 1
         )
 
-    def forward(self):
-        pass
+    def _encode(self, x):
+        h = self.encoder(x)
+        h = self.quant_conv(h)
+        quant, emb_loss, info = self.quantize(h)
+        return quant, emb_loss, info
+
+    def _decode(self, quant):
+        quant = self.post_quant_conv(quant)
+        dec = self.decoder(quant)
+        return dec
+
+    def forward(self, input):
+        quant, diff, _ = self._encode(input)
+        dec = self._decode(quant)
+        return dec, diff
 
 
 class Encoder(torch.nn.Module):
@@ -45,7 +59,7 @@ class Encoder(torch.nn.Module):
         self.n_resolutions = len(cfg.NETWORK.VQGAN.N_CHANNEL_FACTORS)
         # downsampling
         self.conv_in = torch.nn.Conv2d(
-            N_IN_CHANNELS, cfg.NETWORK.VQGAN.CH, kernel_size=3, stride=1, padding=1
+            N_IN_CHANNELS, cfg.NETWORK.VQGAN.N_CHANNEL_BASE, kernel_size=3, stride=1, padding=1
         )
         cur_resolution = cfg.NETWORK.VQGAN.RESOLUTION
         in_channel_factor = (1,) + tuple(cfg.NETWORK.VQGAN.N_CHANNEL_FACTORS)
@@ -72,7 +86,7 @@ class Encoder(torch.nn.Module):
             down.block = block
             down.attn = attn
             if i_level != self.n_resolutions - 1:
-                down.downsample = Downsample(block_in, resamp_with_conv=True)
+                down.downsample = Downsample(block_in, with_conv=True)
                 cur_resolution = cur_resolution // 2
             self.down.append(down)
         # middle
@@ -138,7 +152,7 @@ class Decoder(torch.nn.Module):
             * cfg.NETWORK.VQGAN.N_CHANNEL_FACTORS[self.n_resolutions - 1]
         )
         cur_resolution = cfg.NETWORK.VQGAN.RESOLUTION // 2 ** (self.n_resolutions - 1)
-        self.z_shape = (1, cfg.VQGAN.Z_CHANNELS, cur_resolution, cur_resolution)
+        self.z_shape = (1, cfg.NETWORK.VQGAN.Z_CHANNELS, cur_resolution, cur_resolution)
         logging.debug(
             "Working with z of shape {} = {} dimensions.".format(
                 self.z_shape, np.prod(self.z_shape)
@@ -146,7 +160,7 @@ class Decoder(torch.nn.Module):
         )
         # z to block_in
         self.conv_in = torch.nn.Conv2d(
-            cfg.VQGAN.Z_CHANNELS, block_in, kernel_size=3, stride=1, padding=1
+            cfg.NETWORK.VQGAN.Z_CHANNELS, block_in, kernel_size=3, stride=1, padding=1
         )
         # middle
         self.mid = torch.nn.Module()
@@ -188,7 +202,7 @@ class Decoder(torch.nn.Module):
             up.block = block
             up.attn = attn
             if i_level != 0:
-                up.upsample = Upsample(block_in, resamp_with_conv=True)
+                up.upsample = Upsample(block_in, with_conv=True)
                 cur_resolution = cur_resolution * 2
             self.up.insert(0, up)  # prepend to get consistent order
         # end
@@ -217,9 +231,9 @@ class Decoder(torch.nn.Module):
             if i_level != 0:
                 h = self.up[i_level].upsample(h)
         # end
-        if self.give_pre_end:
-            return h
-
+        # give_pre_end is always set to False
+        # if give_pre_end:
+        #     return h
         h = self.norm_out(h)
         h = nonlinearity(h)
         h = self.conv_out(h)
@@ -233,6 +247,8 @@ class VectorQuantizer(torch.nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.BETA = 0.25
+        self.LEGACY = True
+        self.cfg = cfg
         self.embedding = torch.nn.Embedding(
             cfg.NETWORK.VQGAN.N_EMBED, cfg.NETWORK.VQGAN.EMBED_DIM
         )
@@ -263,7 +279,7 @@ class VectorQuantizer(torch.nn.Module):
         perplexity = None
         min_encodings = None
         # compute loss for embedding
-        if not self.legacy:
+        if not self.LEGACY:
             loss = self.BETA * torch.mean((z_q.detach() - z) ** 2) + torch.mean(
                 (z_q - z.detach()) ** 2
             )
@@ -328,15 +344,14 @@ class Downsample(torch.nn.Module):
 class ResnetBlock(torch.nn.Module):
     def __init__(
         self,
-        *,
         in_channels,
         out_channels=None,
         conv_shortcut=False,
-        dropout,
+        dropout=0.0,
         temb_channels=512,
     ):
         super().__init__()
-        in_channels = in_channels
+        self.in_channels = in_channels
         out_channels = in_channels if out_channels is None else out_channels
         self.out_channels = out_channels
         self.use_conv_shortcut = conv_shortcut
