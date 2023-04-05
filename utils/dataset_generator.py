@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-04 20:43:37
+# @Last Modified at: 2023-04-05 12:10:28
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -29,34 +29,6 @@ import extensions.voxlib as voxlib
 from extensions.cu_extrude_tensor import TensorExtruder
 
 
-def get_highways_and_footprints(osm_file_path):
-    highways, nodes = utils.osm_helper.get_highways(
-        osm_file_path,
-        [
-            {"k": "highway", "v": "trunk"},
-            {"k": "highway", "v": "trunk_link"},
-            {"k": "highway", "v": "primary"},
-            {"k": "highway", "v": "primary_link"},
-            {"k": "highway", "v": "secondary"},
-            {"k": "highway", "v": "secondary_link"},
-            {"k": "highway", "v": "tertiary"},
-            {"k": "highway", "v": "motorway"},
-            {"k": "highway", "v": "service"},
-            {"k": "highway", "v": "residential"},
-        ],
-    )
-    footprints, nodes = utils.osm_helper.get_footprints(
-        osm_file_path,
-        [
-            "building",
-            {"k": "landuse", "v": ["construction"]},
-        ],
-        nodes,
-    )
-    nodes = utils.osm_helper.get_nodes_lng_lat(osm_file_path, nodes)
-    return highways, footprints, nodes
-
-
 def _tag_equals(tags, key, values=None):
     if key not in tags:
         return False
@@ -70,7 +42,8 @@ def _get_highway_color(map_name, highway_tags):
         return 0
     elif map_name == "seg_map":
         # Ignore underground highways
-        return 0 if "layer" in highway_tags and highway_tags["layer"] < 0 else 1
+        # return 0 if "layer" in highway_tags and highway_tags["layer"] < 0 else 1
+        return 1
     else:
         raise Exception("Unknown map name: %s" % map_name)
 
@@ -105,36 +78,49 @@ def _get_footprint_color(map_name, footprint_tags):
         raise Exception("Unknown map name: %s" % map_name)
 
 
+def _remove_mask_outliers(mask):
+    N_PIXELS_THRES = 96
+    mask = cv2.erode(mask, np.ones((5, 5), dtype=np.uint8))
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
+    ignored_indexes = np.where(stats[:, -1] <= N_PIXELS_THRES)[0]
+    ignored_mask = np.isin(labels, ignored_indexes)
+    return mask * ~ignored_mask
+
+
 def get_coast_zones(osm_tile_img_path, img_size):
     tile_img = cv2.imread(osm_tile_img_path)
     water_lb = np.array([219, 219, 195], dtype=np.uint8)
     water_ub = np.array([235, 235, 219], dtype=np.uint8)
-    return cv2.resize(cv2.inRange(tile_img, water_lb, water_ub), img_size[::-1]) != 0
+    mask = cv2.resize(cv2.inRange(tile_img, water_lb, water_ub), img_size[::-1])
+    return _remove_mask_outliers(mask)
 
 
 def get_green_lands(osm_tile_img_path, seg_map):
     tile_img = cv2.imread(osm_tile_img_path)
-    green_lb = np.array([211, 217, 217], dtype=np.uint8)
-    green_ub = np.array([215, 236, 225], dtype=np.uint8)
+    green_lb = np.array([209, 217, 217], dtype=np.uint8)
+    green_ub = np.array([219, 236, 233], dtype=np.uint8)
     # Only assign green lands to uncategoried pixels
     uncategoried = np.zeros_like(seg_map)
     uncategoried[seg_map == 0] = True
-    green_lands = cv2.resize(
+    mask = cv2.resize(
         cv2.inRange(tile_img, green_lb, green_ub), seg_map.shape[::-1]
     )
-    return (green_lands != 0) * uncategoried
+    return _remove_mask_outliers(mask) * uncategoried
 
 
 def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     logging.debug("Reading OSM file[Path=%s] ..." % osm_file_path)
-    highways, footprints, nodes = get_highways_and_footprints(osm_file_path)
+    highways, footprints, nodes = utils.osm_helper.get_highways_and_footprints(
+        osm_file_path
+    )
 
-    logging.debug("Converting lng/lat to X/Y coordinates ...")
-    lnglat_bounds = {
-        k: float(v)
-        for k, v in utils.osm_helper.get_lnglat_bounds(osm_file_path).items()
-    }
-    resolution = utils.osm_helper.get_map_resolution(lnglat_bounds, zoom_level)
+    resolution = utils.osm_helper.get_map_resolution(
+        {
+            k: float(v)
+            for k, v in utils.osm_helper.get_lnglat_bounds(osm_file_path).items()
+        },
+        zoom_level,
+    )
     nodes = utils.osm_helper.get_nodes_xy_coordinates(nodes, resolution, zoom_level)
     xy_bounds = utils.osm_helper.get_xy_bounds(nodes)
 
@@ -146,10 +132,8 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
 
     # Generate semantic labels
     # Plot footprint before highway to make highway more smooth
+    logging.debug("Generating segmentation maps ...")
     seg_map = utils.osm_helper.get_empty_map(xy_bounds)
-    seg_map = utils.osm_helper.plot_highways(
-        "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
-    )
     seg_map = utils.osm_helper.plot_footprints(
         "seg_map",
         _get_footprint_color,
@@ -158,7 +142,11 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         nodes,
         xy_bounds,
     )
-    # Read coast zones from the no-label tile image
+    seg_map = utils.osm_helper.plot_highways(
+        "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
+    )
+    # Read coast zones from no-label tile images
+    logging.debug("Reading green lands and coast zones from tile images ...")
     coast_zones = None
     green_lands = None
     if not os.path.exists(osm_tile_img_path):
@@ -175,6 +163,7 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     seg_map[seg_map == 0] = 6
 
     # Generate height fields
+    logging.debug("Generating height fields ...")
     height_field = utils.osm_helper.get_empty_map(xy_bounds)
     height_field = utils.osm_helper.plot_footprints(
         "height_field",
@@ -194,9 +183,9 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         resolution,
     )
     if coast_zones is not None:
-        height_field[coast_zones] = -5
+        height_field[coast_zones != 0] = -5
     if green_lands is not None:
-        height_field[green_lands] = 5
+        height_field[green_lands != 0] = 5
 
     # Make sure that all height values are above 0
     height_field += 5
@@ -340,6 +329,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
         Image.fromarray(height_field).save(os.path.join(_osm_dir, "hf.png"))
         get_seg_map_img(seg_map).save(os.path.join(_osm_dir, "seg.png"))
         # Align images from Google Earth Studio
+        logging.debug("Generating Google Earth segmentation maps ...")
         _ge_proj_name = get_google_earth_project_name(basename, google_earth_dir)
         if _ge_proj_name is None:
             logging.warning(
@@ -472,7 +462,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
 if __name__ == "__main__":
     plt.rcParams["figure.figsize"] = (48, 30)
     logging.basicConfig(
-        # filename=os.path.join(PROJECT_HOME, "logs", "dataset-generator.log"),
+        filename=os.path.join(PROJECT_HOME, "logs", "dataset-generator.log"),
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.DEBUG,
     )

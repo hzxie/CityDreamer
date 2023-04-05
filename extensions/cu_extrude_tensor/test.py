@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-26 19:23:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-04 20:27:56
+# @Last Modified at: 2023-04-05 09:50:40
 # @Email:  root@haozhexie.com
 
 # Mayavi off screen rendering
@@ -38,8 +38,9 @@ Image.MAX_IMAGE_PIXELS = None
 
 
 class ExtrudeTensorTestCase(unittest.TestCase):
+    @unittest.skip("The CUDA extension is compiled with int types by default.")
     def test_extrude_tensor_grad(self):
-        # Make sure that the int types are replaced by double in CUDA implementation
+        # To run this test, make sure that the int types are replaced by double types in CUDA
         SIZE = 16
         seg_map = (
             torch.randint(low=1, high=7, size=(SIZE, SIZE))
