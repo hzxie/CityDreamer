@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 13:51:36
+# @Last Modified at: 2023-04-05 19:11:21
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -111,7 +111,6 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     highways, footprints, nodes = utils.osm_helper.get_highways_and_footprints(
         osm_file_path
     )
-
     resolution = utils.osm_helper.get_map_resolution(
         {
             k: float(v)
@@ -180,15 +179,15 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         xy_bounds,
         resolution,
     )
+    height_field[height_field == 0] = 4
     if coast_zones is not None:
-        height_field[coast_zones != 0] = -5
+        height_field[coast_zones != 0] = 0
     if green_lands is not None:
-        height_field[green_lands != 0] = 5
+        height_field[green_lands != 0] = 8
 
-    # Make sure that all height values are above 0
-    height_field += 5
     # Normalize the height values of the image with the same scale as the width and height dimensions
-    height_field = (height_field * resolution).astype(np.uint16)
+    assert height_field.all() >= 0 and height_field.all() < 256
+    height_field = (height_field * resolution).astype(np.uint8)
 
     return height_field, seg_map, {"resolution": resolution, "bounds": xy_bounds}
 
