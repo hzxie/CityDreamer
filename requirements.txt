@@ -1,3 +1,5 @@
+easydict
+einops
 lxml
 matplotlib
 mayavi
