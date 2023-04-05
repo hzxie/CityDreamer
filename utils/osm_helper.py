@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 10:27:31
+# @Last Modified at: 2023-04-05 13:51:05
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -51,16 +51,22 @@ def get_highways_and_footprints(osm_file_path):
     highways, nodes = get_highways(
         osm_file_path,
         [
-            {"k": "highway", "v": "trunk"},
-            {"k": "highway", "v": "trunk_link"},
-            {"k": "highway", "v": "primary"},
-            {"k": "highway", "v": "primary_link"},
-            {"k": "highway", "v": "secondary"},
-            {"k": "highway", "v": "secondary_link"},
-            {"k": "highway", "v": "tertiary"},
-            {"k": "highway", "v": "motorway"},
-            {"k": "highway", "v": "service"},
-            {"k": "highway", "v": "residential"},
+            {
+                "k": "highway",
+                "v": [
+                    "trunk",
+                    "trunk_link",
+                    "primary",
+                    "primary_link",
+                    "secondary",
+                    "secondary_link",
+                    "tertiary",
+                    "motorway",
+                    "service",
+                    "residential",
+                    "unclassified",
+                ],
+            }
         ],
     )
     footprints, nodes = get_footprints(
@@ -303,7 +309,7 @@ def _get_missing_highway_width(highway_tags):
         return 4.5
     elif highway_level in ["tertiary"]:
         return 4.5
-    else:  # ["service", "residential"]
+    else:  # ["service", "residential", "unclassified"]
         return 2.5
 
 

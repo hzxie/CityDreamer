@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 12:10:28
+# @Last Modified at: 2023-04-05 13:51:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -102,9 +102,7 @@ def get_green_lands(osm_tile_img_path, seg_map):
     # Only assign green lands to uncategoried pixels
     uncategoried = np.zeros_like(seg_map)
     uncategoried[seg_map == 0] = True
-    mask = cv2.resize(
-        cv2.inRange(tile_img, green_lb, green_ub), seg_map.shape[::-1]
-    )
+    mask = cv2.resize(cv2.inRange(tile_img, green_lb, green_ub), seg_map.shape[::-1])
     return _remove_mask_outliers(mask) * uncategoried
 
 
