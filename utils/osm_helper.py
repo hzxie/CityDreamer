@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-04 15:21:12
+# @Last Modified at: 2023-04-05 10:27:31
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -45,6 +45,34 @@ def get_xy_bounds(nodes):
         "ymin": math.ceil(min_y),
         "ymax": math.floor(max_y),
     }
+
+
+def get_highways_and_footprints(osm_file_path):
+    highways, nodes = get_highways(
+        osm_file_path,
+        [
+            {"k": "highway", "v": "trunk"},
+            {"k": "highway", "v": "trunk_link"},
+            {"k": "highway", "v": "primary"},
+            {"k": "highway", "v": "primary_link"},
+            {"k": "highway", "v": "secondary"},
+            {"k": "highway", "v": "secondary_link"},
+            {"k": "highway", "v": "tertiary"},
+            {"k": "highway", "v": "motorway"},
+            {"k": "highway", "v": "service"},
+            {"k": "highway", "v": "residential"},
+        ],
+    )
+    footprints, nodes = get_footprints(
+        osm_file_path,
+        [
+            "building",
+            {"k": "landuse", "v": ["construction"]},
+        ],
+        nodes,
+    )
+    nodes = get_nodes_lng_lat(osm_file_path, nodes)
+    return highways, footprints, nodes
 
 
 def get_nodes_lng_lat(osm_file_path, nodes):
@@ -263,9 +291,7 @@ def fix_missing_highway_width(highways):
 
 def _get_missing_highway_width(highway_tags):
     highway_level = highway_tags["highway"] if "highway" in highway_tags else None
-    if highway_level == "motorway":
-        return 4.5 * 8
-    if highway_level == "trunk":
+    if highway_level in ["motorway", "trunk"]:
         return 4.5 * 6
     elif highway_level == "primary":
         return 4.5 * 4
@@ -275,10 +301,10 @@ def _get_missing_highway_width(highway_tags):
         return 4.5
     elif highway_level in ["motorway_link", "trunk_link", "primary_link"]:
         return 4.5
-    elif highway_level in ["tertiary", "service", "residential"]:
+    elif highway_level in ["tertiary"]:
         return 4.5
-    else:
-        return 4.5
+    else:  # ["service", "residential"]
+        return 2.5
 
 
 def get_footprint_height_stat(footprints):
