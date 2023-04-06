@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 20:44:58
+# @Last Modified at: 2023-04-06 21:00:33
 # @Email:  root@haozhexie.com
 
 import logging
@@ -30,6 +30,7 @@ def train(cfg):
     dataset_name = cfg.TRAIN[network_name].DATASET
     if cfg.TRAIN.NETWORK == "VQGAN":
         network = models.vqvae.VQVAE(cfg)
+    rank = 0
     if torch.cuda.is_available():
         torch.distributed.init_process_group("nccl")
         rank = torch.distributed.get_rank()
@@ -90,7 +91,8 @@ def train(cfg):
         os.makedirs(cfg.DIR.CHECKPOINTS)
 
     # Summary writer
-    tb_writer = utils.summary_writer.SummaryWriter(cfg)
+    if rank == 0:
+        tb_writer = utils.summary_writer.SummaryWriter(cfg)
 
     # Training/Testing the network
     n_batches = len(train_data_loader)
@@ -106,8 +108,8 @@ def train(cfg):
             data_time.update(time() - batch_end_time)
 
             try:
-                input = utils.helpers.var_or_cuda(data["input"], device_id)
-                output = utils.helpers.var_or_cuda(data["output"], device_id)
+                input = utils.helpers.var_or_cuda(data["input"], network.device)
+                output = utils.helpers.var_or_cuda(data["output"], network.device)
                 pred = network(input)
                 loss = l1_loss(pred["output"], output) + pred["loss"]
 
@@ -119,70 +121,74 @@ def train(cfg):
                 logging.exception(ex)
                 continue
 
-            tb_writer.add_scalars(
-                {
-                    "Loss/Batch/Rec": loss.item(),
-                    "Loss/Batch/Quant": pred["loss"].item(),
-                },
-                n_itr,
-            )
             batch_time.update(time() - batch_end_time)
             batch_end_time = time()
-            logging.info(
-                "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Losses = %s"
-                % (
-                    epoch_idx,
-                    cfg.TRAIN.N_EPOCHS,
-                    batch_idx + 1,
-                    n_batches,
-                    batch_time.val(),
-                    data_time.val(),
-                    ["%.4f" % l for l in losses.val()],
+            if rank == 0:
+                tb_writer.add_scalars(
+                    {
+                        "Loss/Batch/Rec": loss.item(),
+                        "Loss/Batch/Quant": pred["loss"].item(),
+                    },
+                    n_itr,
                 )
-            )
+                logging.info(
+                    "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Losses = %s"
+                    % (
+                        epoch_idx,
+                        cfg.TRAIN.N_EPOCHS,
+                        batch_idx + 1,
+                        n_batches,
+                        batch_time.val(),
+                        data_time.val(),
+                        ["%.4f" % l for l in losses.val()],
+                    )
+                )
         # TODO: Enable it later
         # lr_scheduler.step()
         epoch_end_time = time()
-        tb_writer.add_scalars(
-            {
-                "Loss/Epoch/Rec/Train": losses.avg(0),
-                "Loss/Epoch/Quant/Train": losses.avg(1),
-            },
-            epoch_idx,
-        )
-        logging.info(
-            "[Epoch %d/%d] EpochTime = %.3f (s) Losses = %s"
-            % (
+        if rank == 0:
+            tb_writer.add_scalars(
+                {
+                    "Loss/Epoch/Rec/Train": losses.avg(0),
+                    "Loss/Epoch/Quant/Train": losses.avg(1),
+                },
                 epoch_idx,
-                cfg.TRAIN.N_EPOCHS,
-                epoch_end_time - epoch_start_time,
-                ["%.4f" % l for l in losses.avg()],
             )
-        )
+            logging.info(
+                "[Epoch %d/%d] EpochTime = %.3f (s) Losses = %s"
+                % (
+                    epoch_idx,
+                    cfg.TRAIN.N_EPOCHS,
+                    epoch_end_time - epoch_start_time,
+                    ["%.4f" % l for l in losses.avg()],
+                )
+            )
 
         # Evaluate the current model
         losses, key_frames = core.test(cfg, val_data_loader, network)
-        tb_writer.add_scalars(
-            {
-                "Loss/Epoch/Rec/Test": losses.avg(0),
-                "Loss/Epoch/Quant/Test": losses.avg(1),
-            },
-            epoch_idx,
-        )
-        tb_writer.add_images(key_frames, epoch_idx)
-        # Save ckeckpoints
-        if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
-            output_path = os.path.join(
-                cfg.DIR.CHECKPOINTS, "ckpt-epoch-%06d.pth" % epoch_idx
-            )
-            torch.save(
+        if rank == 0:
+            tb_writer.add_scalars(
                 {
-                    "cfg": cfg,
-                    "epoch_index": epoch_idx,
-                    network_name: network.state_dict(),
+                    "Loss/Epoch/Rec/Test": losses.avg(0),
+                    "Loss/Epoch/Quant/Test": losses.avg(1),
                 },
-                output_path,
+                epoch_idx,
             )
-            logging.info("Saved checkpoint to %s ..." % output_path)
+            tb_writer.add_images(key_frames, epoch_idx)
+            # Save ckeckpoints
+            if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
+                output_path = os.path.join(
+                    cfg.DIR.CHECKPOINTS, "ckpt-epoch-%06d.pth" % epoch_idx
+                )
+                torch.save(
+                    {
+                        "cfg": cfg,
+                        "epoch_index": epoch_idx,
+                        network_name: network.state_dict(),
+                    },
+                    output_path,
+                )
+                logging.info("Saved checkpoint to %s ..." % output_path)
 
-    tb_writer.close()
+    if rank == 0:
+        tb_writer.close()

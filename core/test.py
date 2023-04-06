@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 19:22:10
+# @Last Modified at: 2023-04-06 21:03:13
 # @Email:  root@haozhexie.com
 
 import logging
@@ -17,7 +17,6 @@ import utils.helpers
 
 def test(cfg, test_data_loader=None, network=None):
     torch.backends.cudnn.benchmark = True
-
     if network is None:
         # TODO
         network_name = ""
@@ -55,8 +54,8 @@ def test(cfg, test_data_loader=None, network=None):
     # Testing loop
     for idx, data in enumerate(test_data_loader):
         with torch.no_grad():
-            input = utils.helpers.var_or_cuda(data["input"])
-            output = utils.helpers.var_or_cuda(data["output"])
+            input = utils.helpers.var_or_cuda(data["input"], network.device)
+            output = utils.helpers.var_or_cuda(data["output"], network.device)
             pred = network(input)
             loss = l1_loss(pred["output"], output) + pred["loss"]
             test_losses.update([loss.item(), pred["loss"]])
@@ -72,6 +71,7 @@ def test(cfg, test_data_loader=None, network=None):
                     else key_frame_prefix
                 )
                 key_frames[_key] = v
+
             logging.info(
                 "Test[%d/%d] Losses = %s"
                 % (idx + 1, n_samples, ["%.4f" % l for l in test_losses.val()])
