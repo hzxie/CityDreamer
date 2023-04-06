@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 19:49:41
+# @Last Modified at: 2023-04-06 20:44:58
 # @Email:  root@haozhexie.com
 
 import logging
@@ -31,7 +31,13 @@ def train(cfg):
     if cfg.TRAIN.NETWORK == "VQGAN":
         network = models.vqvae.VQVAE(cfg)
     if torch.cuda.is_available():
-        network = torch.nn.DataParallel(network).cuda()
+        torch.distributed.init_process_group("nccl")
+        rank = torch.distributed.get_rank()
+        logging.info("Start running the DDP %s on rank %d." % (network_name, rank))
+        device_id = rank % torch.cuda.device_count()
+        network = torch.nn.parallel.DistributedDataParallel(
+            network.to(device_id), device_ids=[device_id]
+        )
 
     # Current train config
     cfg.TRAIN = cfg.TRAIN[cfg.TRAIN.NETWORK]
@@ -100,8 +106,8 @@ def train(cfg):
             data_time.update(time() - batch_end_time)
 
             try:
-                input = utils.helpers.var_or_cuda(data["input"])
-                output = utils.helpers.var_or_cuda(data["output"])
+                input = utils.helpers.var_or_cuda(data["input"], device_id)
+                output = utils.helpers.var_or_cuda(data["output"], device_id)
                 pred = network(input)
                 loss = l1_loss(pred["output"], output) + pred["loss"]
 

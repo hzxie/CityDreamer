@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 19:32:42
+# @Last Modified at: 2023-04-06 20:05:15
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -26,7 +26,6 @@ __C.DATASETS.OSM_LAYOUT.DIR                      = "./data/osm"
 #
 __C.CONST                                        = EasyDict()
 __C.CONST.EXP_NAME                               = datetime.now().isoformat()
-__C.CONST.DEVICE                                 = '0'
 __C.CONST.N_WORKERS                              = 32
 
 #

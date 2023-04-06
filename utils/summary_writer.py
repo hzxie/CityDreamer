@@ -42,7 +42,7 @@ class SummaryWriter(object):
 
     def _get_tb_image(self, image):
         if type(image) == PIL.Image.Image:
-            return np.array(image.convert('RGB'))
+            return np.array(image.convert("RGB"))
         elif len(image.shape) == 2:
             return image
         else:
@@ -60,7 +60,10 @@ class SummaryWriter(object):
         if type(self.writer) == torch.utils.tensorboard.writer.SummaryWriter:
             for k, v in images.items():
                 self.writer.add_image(
-                    k, self._get_tb_image(v), step, dataformats=self._get_tb_image_format(v)
+                    k,
+                    self._get_tb_image(v),
+                    step,
+                    dataformats=self._get_tb_image_format(v),
                 )
         else:
             self.writer.log({k: wandb.Image(v) for k, v in images.items()})

@@ -7,6 +7,9 @@ numpy
 opencv-python
 pillow
 tensorboard
+torch
+torchvision
 tqdm
 xvfbwrapper
 wandb
+
