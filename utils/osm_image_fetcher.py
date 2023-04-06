@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-04 14:46:29
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 10:39:29
+# @Last Modified at: 2023-04-06 11:06:03
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -131,7 +131,7 @@ def main(osm_dir, zoom_level):
 
 if __name__ == "__main__":
     logging.basicConfig(
-        filename=os.path.join(PROJECT_HOME, "logs", "osm-image-fetcher.log"),
+        filename=os.path.join(PROJECT_HOME, "output", "osm-image-fetcher.log"),
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.DEBUG,
     )

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:09:04
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 21:40:06
+# @Last Modified at: 2023-04-06 14:12:20
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/CompVis/taming-transformers
 
@@ -48,7 +48,7 @@ class VQVAE(torch.nn.Module):
     def forward(self, input):
         quant, diff, _ = self._encode(input)
         dec = self._decode(quant)
-        return dec, diff
+        return {"output": dec, "loss": diff}
 
 
 class Encoder(torch.nn.Module):
@@ -59,7 +59,11 @@ class Encoder(torch.nn.Module):
         self.n_resolutions = len(cfg.NETWORK.VQGAN.N_CHANNEL_FACTORS)
         # downsampling
         self.conv_in = torch.nn.Conv2d(
-            N_IN_CHANNELS, cfg.NETWORK.VQGAN.N_CHANNEL_BASE, kernel_size=3, stride=1, padding=1
+            N_IN_CHANNELS,
+            cfg.NETWORK.VQGAN.N_CHANNEL_BASE,
+            kernel_size=3,
+            stride=1,
+            padding=1,
         )
         cur_resolution = cfg.NETWORK.VQGAN.RESOLUTION
         in_channel_factor = (1,) + tuple(cfg.NETWORK.VQGAN.N_CHANNEL_FACTORS)

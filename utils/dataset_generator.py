@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 19:11:21
+# @Last Modified at: 2023-04-06 11:06:54
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -459,7 +459,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
 if __name__ == "__main__":
     plt.rcParams["figure.figsize"] = (48, 30)
     logging.basicConfig(
-        filename=os.path.join(PROJECT_HOME, "logs", "dataset-generator.log"),
+        filename=os.path.join(PROJECT_HOME, "output", "dataset-generator.log"),
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.DEBUG,
     )

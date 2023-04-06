@@ -6,5 +6,7 @@ mayavi
 numpy
 opencv-python
 pillow
+tensorboardX
 tqdm
 xvfbwrapper
+wandb
