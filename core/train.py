@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 21:00:33
+# @Last Modified at: 2023-04-06 21:39:54
 # @Email:  root@haozhexie.com
 
 import logging
@@ -30,36 +30,47 @@ def train(cfg):
     dataset_name = cfg.TRAIN[network_name].DATASET
     if cfg.TRAIN.NETWORK == "VQGAN":
         network = models.vqvae.VQVAE(cfg)
-    rank = 0
+    local_rank = 0
     if torch.cuda.is_available():
         torch.distributed.init_process_group("nccl")
-        rank = torch.distributed.get_rank()
-        logging.info("Start running the DDP %s on rank %d." % (network_name, rank))
-        device_id = rank % torch.cuda.device_count()
+        local_rank = torch.distributed.get_rank()
+        logging.info(
+            "Start running the DDP %s on rank %d." % (network_name, local_rank)
+        )
+        device_id = local_rank % torch.cuda.device_count()
         network = torch.nn.parallel.DistributedDataParallel(
             network.to(device_id), device_ids=[device_id]
         )
+    else:
+        network.device = torch.device("cpu")
 
     # Current train config
     cfg.TRAIN = cfg.TRAIN[cfg.TRAIN.NETWORK]
 
     # Set up data loader
+    train_dataset = utils.datasets.get_dataset(cfg, dataset_name, "train")
+    val_dataset = utils.datasets.get_dataset(cfg, dataset_name, "val")
+    train_sampler = torch.utils.data.distributed.DistributedSampler(
+        train_dataset, rank=local_rank, shuffle=True, drop_last=True
+    )
+    val_sampler = torch.utils.data.distributed.DistributedSampler(
+        val_dataset, rank=local_rank, shuffle=False
+    )
     train_data_loader = torch.utils.data.DataLoader(
-        dataset=utils.datasets.get_dataset(cfg, dataset_name, "train"),
+        dataset=train_dataset,
         batch_size=cfg.TRAIN.BATCH_SIZE,
         num_workers=cfg.CONST.N_WORKERS,
         collate_fn=utils.datasets.collate_fn,
-        pin_memory=True,
-        shuffle=True,
-        drop_last=True,
+        pin_memory=False,
+        sampler=train_sampler,
     )
     val_data_loader = torch.utils.data.DataLoader(
-        dataset=utils.datasets.get_dataset(cfg, dataset_name, "val"),
+        dataset=val_dataset,
         batch_size=1,
         num_workers=cfg.CONST.N_WORKERS,
         collate_fn=utils.datasets.collate_fn,
         pin_memory=True,
-        shuffle=False,
+        sampler=val_sampler,
     )
 
     # Set up optimizers
@@ -91,7 +102,7 @@ def train(cfg):
         os.makedirs(cfg.DIR.CHECKPOINTS)
 
     # Summary writer
-    if rank == 0:
+    if local_rank == 0:
         tb_writer = utils.summary_writer.SummaryWriter(cfg)
 
     # Training/Testing the network
@@ -101,7 +112,8 @@ def train(cfg):
         batch_time = utils.average_meter.AverageMeter()
         data_time = utils.average_meter.AverageMeter()
         losses = utils.average_meter.AverageMeter(["RecLoss", "QuantLoss"])
-
+        # Randomize the DistributedSampler
+        train_sampler.set_epoch(epoch_idx)
         batch_end_time = time()
         for batch_idx, data in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
@@ -123,7 +135,7 @@ def train(cfg):
 
             batch_time.update(time() - batch_end_time)
             batch_end_time = time()
-            if rank == 0:
+            if local_rank == 0:
                 tb_writer.add_scalars(
                     {
                         "Loss/Batch/Rec": loss.item(),
@@ -146,7 +158,7 @@ def train(cfg):
         # TODO: Enable it later
         # lr_scheduler.step()
         epoch_end_time = time()
-        if rank == 0:
+        if local_rank == 0:
             tb_writer.add_scalars(
                 {
                     "Loss/Epoch/Rec/Train": losses.avg(0),
@@ -166,7 +178,7 @@ def train(cfg):
 
         # Evaluate the current model
         losses, key_frames = core.test(cfg, val_data_loader, network)
-        if rank == 0:
+        if local_rank == 0:
             tb_writer.add_scalars(
                 {
                     "Loss/Epoch/Rec/Test": losses.avg(0),
@@ -190,5 +202,5 @@ def train(cfg):
                 )
                 logging.info("Saved checkpoint to %s ..." % output_path)
 
-    if rank == 0:
+    if local_rank == 0:
         tb_writer.close()
