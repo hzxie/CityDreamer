@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 15:34:53
+# @Last Modified at: 2023-04-06 21:50:40
 # @Email:  root@haozhexie.com
 
 
@@ -25,7 +25,7 @@ def get_args_from_command_line():
         "-e", "--exp", dest="exp_name", help="Experiment Name", default=None, type=str
     )
     parser.add_argument(
-        "--c",
+        "-c",
         "--cfg",
         dest="cfg_file",
         help="Path to the config.py file",

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 21:39:54
+# @Last Modified at: 2023-04-06 21:51:25
 # @Email:  root@haozhexie.com
 
 import logging
@@ -98,8 +98,7 @@ def train(cfg):
     output_dir = os.path.join(cfg.DIR.OUTPUT, "%s", cfg.CONST.EXP_NAME)
     cfg.DIR.CHECKPOINTS = output_dir % "checkpoints"
     cfg.DIR.LOGS = output_dir % "logs"
-    if not os.path.exists(cfg.DIR.CHECKPOINTS):
-        os.makedirs(cfg.DIR.CHECKPOINTS)
+    os.makedirs(cfg.DIR.CHECKPOINTS, exist_ok=True)
 
     # Summary writer
     if local_rank == 0:
