@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 15:50:50
+# @Last Modified at: 2023-04-06 19:49:41
 # @Email:  root@haozhexie.com
 
 import logging
@@ -13,16 +13,17 @@ import torch
 
 import core.test
 import models.vqvae
-import utils.helpers
-import utils.datasets
-import utils.summary_writer
 import utils.average_meter
+import utils.datasets
+import utils.helpers
+import utils.summary_writer
 
 
 from time import time
 
 
 def train(cfg):
+    torch.backends.cudnn.benchmark = True
     # Set up networks
     network = None
     network_name = cfg.TRAIN.NETWORK
@@ -91,7 +92,7 @@ def train(cfg):
         epoch_start_time = time()
         batch_time = utils.average_meter.AverageMeter()
         data_time = utils.average_meter.AverageMeter()
-        losses = utils.average_meter.AverageMeter()
+        losses = utils.average_meter.AverageMeter(["RecLoss", "QuantLoss"])
 
         batch_end_time = time()
         for batch_idx, data in enumerate(train_data_loader):
@@ -104,7 +105,7 @@ def train(cfg):
                 pred = network(input)
                 loss = l1_loss(pred["output"], output) + pred["loss"]
 
-                losses.update(loss.item())
+                losses.update([loss.item(), pred["loss"]])
                 network.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -112,11 +113,17 @@ def train(cfg):
                 logging.exception(ex)
                 continue
 
-            tb_writer.add_scalars({"Loss/Batch": loss.item()}, n_itr)
+            tb_writer.add_scalars(
+                {
+                    "Loss/Batch/Rec": loss.item(),
+                    "Loss/Batch/Quant": pred["loss"].item(),
+                },
+                n_itr,
+            )
             batch_time.update(time() - batch_end_time)
             batch_end_time = time()
             logging.info(
-                "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Loss = %.4f"
+                "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Losses = %s"
                 % (
                     epoch_idx,
                     cfg.TRAIN.N_EPOCHS,
@@ -124,26 +131,39 @@ def train(cfg):
                     n_batches,
                     batch_time.val(),
                     data_time.val(),
-                    losses.val(),
+                    ["%.4f" % l for l in losses.val()],
                 )
             )
-
         # TODO: Enable it later
         # lr_scheduler.step()
         epoch_end_time = time()
-        tb_writer.add_scalars({"Loss/Epoch": losses.avg()}, epoch_idx)
+        tb_writer.add_scalars(
+            {
+                "Loss/Epoch/Rec/Train": losses.avg(0),
+                "Loss/Epoch/Quant/Train": losses.avg(1),
+            },
+            epoch_idx,
+        )
         logging.info(
-            "[Epoch %d/%d] EpochTime = %.3f (s) Loss = %.4f"
+            "[Epoch %d/%d] EpochTime = %.3f (s) Losses = %s"
             % (
                 epoch_idx,
                 cfg.TRAIN.N_EPOCHS,
                 epoch_end_time - epoch_start_time,
-                losses.avg(),
+                ["%.4f" % l for l in losses.avg()],
             )
         )
 
         # Evaluate the current model
-        _ = core.test(cfg, epoch_idx, val_data_loader, tb_writer, network)
+        losses, key_frames = core.test(cfg, val_data_loader, network)
+        tb_writer.add_scalars(
+            {
+                "Loss/Epoch/Rec/Test": losses.avg(0),
+                "Loss/Epoch/Quant/Test": losses.avg(1),
+            },
+            epoch_idx,
+        )
+        tb_writer.add_images(key_frames, epoch_idx)
         # Save ckeckpoints
         if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
             output_path = os.path.join(

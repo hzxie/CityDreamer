@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 11:06:54
+# @Last Modified at: 2023-04-06 16:32:48
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -24,6 +24,7 @@ from PIL import Image
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
 
+import utils.helpers
 import utils.osm_helper
 import extensions.voxlib as voxlib
 from extensions.cu_extrude_tensor import TensorExtruder
@@ -192,26 +193,6 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     return height_field, seg_map, {"resolution": resolution, "bounds": xy_bounds}
 
 
-def get_seg_map_img(seg_map):
-    PALETTE = np.array([[i, i, i] for i in range(256)])
-    # fmt: off
-    PALETTE[:7] = np.array(
-        [
-            [0, 0, 0],       # empty        -> black (ONLY used in voxel)
-            [96, 0, 0],      # highway      -> red
-            [96, 96, 0],     # building     -> yellow
-            [0, 96, 0],      # green lands  -> green
-            [0, 96, 96],     # construction -> cyan
-            [0, 0, 96],      # water        -> blue
-            [128, 128, 128], # ground       -> gray
-        ]
-    )
-    # fmt: on
-    seg_map = Image.fromarray(seg_map.astype(np.uint8))
-    seg_map.putpalette(PALETTE.reshape(-1).tolist())
-    return seg_map
-
-
 def get_google_earth_project_name(osm_basename, google_earth_dir):
     ge_projects = os.listdir(google_earth_dir)
     osm_info = osm_basename.split("-")
@@ -324,7 +305,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
             os.path.join(osm_dir, of), os.path.join(_osm_dir, "tiles.png"), zoom_level
         )
         Image.fromarray(height_field).save(os.path.join(_osm_dir, "hf.png"))
-        get_seg_map_img(seg_map).save(os.path.join(_osm_dir, "seg.png"))
+        utils.helpers.get_seg_map(seg_map).save(os.path.join(_osm_dir, "seg.png"))
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")
         _ge_proj_name = get_google_earth_project_name(basename, google_earth_dir)
@@ -451,7 +432,7 @@ def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
             # Generate the corresponding segmentation images
             ges_seg_dir = os.path.join(google_earth_dir, _ge_proj_name, "seg")
             os.makedirs(ges_seg_dir, exist_ok=True)
-            get_seg_map_img(voxel_id.squeeze()[..., 0].cpu().numpy()).save(
+            utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy()).save(
                 os.path.join(ges_seg_dir, "%s-%04d.png" % (_ge_proj_name, idx))
             )
 

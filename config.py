@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 15:41:41
+# @Last Modified at: 2023-04-06 19:32:42
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -77,9 +77,9 @@ __C.TRAIN.NETWORK                                = "VQGAN"
 __C.TRAIN.VQGAN                                  = EasyDict()
 __C.TRAIN.VQGAN.DATASET                          = "OSM_LAYOUT"
 __C.TRAIN.VQGAN.N_EPOCHS                         = 200000
+__C.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 1000
 __C.TRAIN.VQGAN.BATCH_SIZE                       = 2
 __C.TRAIN.VQGAN.BASE_LR                          = 4.5e-6
 __C.TRAIN.VQGAN.WEIGHT_DECAY                     = 0
 __C.TRAIN.VQGAN.BETAS                            = (0.5, 0.9)
-__C.TRAIN.CKPT_SAVE_FREQ                         = 1000
 # fmt: on
