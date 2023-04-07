@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 13:28:53
+# @Last Modified at: 2023-04-07 20:03:32
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -62,7 +62,7 @@ def mask_to_onehot(mask, n_class, ignored_classes=[]):
 def onehot_to_mask(onehot, ignored_classes=[]):
     mask = torch.argmax(onehot, dim=1)
     for ic in ignored_classes:
-        mask[mask > ic] += 1
+        mask[mask >= ic] += 1
 
     return mask
 
