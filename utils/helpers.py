@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 19:42:20
+# @Last Modified at: 2023-04-07 13:28:53
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -45,15 +45,34 @@ def get_seg_map(seg_map):
     return seg_map
 
 
-def get_keyframes(tensor):
+def mask_to_onehot(mask, n_class, ignored_classes=[]):
+    h, w = mask.shape
+    n_class_actual = n_class - len(ignored_classes)
+    one_hot_masks = np.zeros((h, w, n_class_actual), dtype=np.uint8)
+
+    n_class_cnt = 0
+    for i in range(n_class):
+        if i not in ignored_classes:
+            one_hot_masks[..., n_class_cnt] = mask == i
+            n_class_cnt += 1
+
+    return one_hot_masks
+
+
+def onehot_to_mask(onehot, ignored_classes=[]):
+    mask = torch.argmax(onehot, dim=1)
+    for ic in ignored_classes:
+        mask[mask > ic] += 1
+
+    return mask
+
+
+def tensor_to_image(tensor, mode):
+    # assert mode in ["HeightField", "SegMap"]
     tensor = tensor.permute(1, 2, 0).cpu().numpy()
-    n_ch = tensor.shape[2]
-    if n_ch == 3 or n_ch == 1:
-        return {None: tensor}
-    elif n_ch == 2:
-        return {
-            "HeightField": tensor[..., 0] / np.max(tensor[..., 0]),
-            "SegMap": get_seg_map(tensor[..., 1]).convert("RGB"),
-        }
+    if mode == "HeightField":
+        return tensor.squeeze() / np.max(tensor)
+    elif mode == "SegMap":
+        return get_seg_map(tensor.squeeze()).convert("RGB")
     else:
-        raise Exception("Unknown image format with channels=%d" % n_ch)
+        raise Exception("Unknown mode: %s" % mode)

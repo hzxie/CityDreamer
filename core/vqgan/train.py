@@ -4,14 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 21:51:25
+# @Last Modified at: 2023-04-07 13:30:58
 # @Email:  root@haozhexie.com
 
 import logging
 import os
 import torch
 
-import core.test
+import core.vqgan.test
 import models.vqvae
 import utils.average_meter
 import utils.datasets
@@ -25,14 +25,11 @@ from time import time
 def train(cfg):
     torch.backends.cudnn.benchmark = True
     # Set up networks
-    network = None
-    network_name = cfg.TRAIN.NETWORK
+    network = models.vqvae.VQVAE(cfg)
+    network_name = cfg.CONST.NETWORK
     dataset_name = cfg.TRAIN[network_name].DATASET
-    if cfg.TRAIN.NETWORK == "VQGAN":
-        network = models.vqvae.VQVAE(cfg)
     local_rank = 0
     if torch.cuda.is_available():
-        torch.distributed.init_process_group("nccl")
         local_rank = torch.distributed.get_rank()
         logging.info(
             "Start running the DDP %s on rank %d." % (network_name, local_rank)
@@ -45,17 +42,21 @@ def train(cfg):
         network.device = torch.device("cpu")
 
     # Current train config
-    cfg.TRAIN = cfg.TRAIN[cfg.TRAIN.NETWORK]
+    cfg.TRAIN = cfg.TRAIN[network_name]
 
     # Set up data loader
     train_dataset = utils.datasets.get_dataset(cfg, dataset_name, "train")
     val_dataset = utils.datasets.get_dataset(cfg, dataset_name, "val")
-    train_sampler = torch.utils.data.distributed.DistributedSampler(
-        train_dataset, rank=local_rank, shuffle=True, drop_last=True
-    )
-    val_sampler = torch.utils.data.distributed.DistributedSampler(
-        val_dataset, rank=local_rank, shuffle=False
-    )
+    train_sampler = None
+    val_sampler = None
+    if torch.cuda.is_available():
+        train_sampler = torch.utils.data.distributed.DistributedSampler(
+            train_dataset, rank=local_rank, shuffle=True, drop_last=True
+        )
+        val_sampler = torch.utils.data.distributed.DistributedSampler(
+            val_dataset, rank=local_rank, shuffle=False
+        )
+
     train_data_loader = torch.utils.data.DataLoader(
         dataset=train_dataset,
         batch_size=cfg.TRAIN.BATCH_SIZE,
@@ -85,6 +86,7 @@ def train(cfg):
 
     # Set up loss functions
     l1_loss = torch.nn.L1Loss()
+    ce_loss = torch.nn.CrossEntropyLoss()
 
     # Load the pretrained model if exists
     init_epoch = 0
@@ -110,9 +112,13 @@ def train(cfg):
         epoch_start_time = time()
         batch_time = utils.average_meter.AverageMeter()
         data_time = utils.average_meter.AverageMeter()
-        losses = utils.average_meter.AverageMeter(["RecLoss", "QuantLoss"])
+        losses = utils.average_meter.AverageMeter(
+            ["RecLoss", "SegLoss", "QuantLoss", "TotalLoss"]
+        )
         # Randomize the DistributedSampler
-        train_sampler.set_epoch(epoch_idx)
+        if train_sampler:
+            train_sampler.set_epoch(epoch_idx)
+
         batch_end_time = time()
         for batch_idx, data in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
@@ -121,10 +127,13 @@ def train(cfg):
             try:
                 input = utils.helpers.var_or_cuda(data["input"], network.device)
                 output = utils.helpers.var_or_cuda(data["output"], network.device)
-                pred = network(input)
-                loss = l1_loss(pred["output"], output) + pred["loss"]
-
-                losses.update([loss.item(), pred["loss"]])
+                pred, quant_loss = network(input)
+                rec_loss = l1_loss(pred[..., 0], output[..., 0])
+                seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
+                loss = rec_loss + seg_loss + quant_loss
+                losses.update(
+                    [rec_loss.item(), seg_loss.item(), quant_loss.item(), loss.item()]
+                )
                 network.zero_grad()
                 loss.backward()
                 optimizer.step()
@@ -137,8 +146,10 @@ def train(cfg):
             if local_rank == 0:
                 tb_writer.add_scalars(
                     {
-                        "Loss/Batch/Rec": loss.item(),
-                        "Loss/Batch/Quant": pred["loss"].item(),
+                        "Loss/Batch/Rec": rec_loss.item(),
+                        "Loss/Batch/Seg": seg_loss.item(),
+                        "Loss/Batch/Quant": quant_loss.item(),
+                        "Loss/Batch/Total": loss.item(),
                     },
                     n_itr,
                 )
@@ -161,7 +172,9 @@ def train(cfg):
             tb_writer.add_scalars(
                 {
                     "Loss/Epoch/Rec/Train": losses.avg(0),
-                    "Loss/Epoch/Quant/Train": losses.avg(1),
+                    "Loss/Epoch/Seg/Train": losses.avg(1),
+                    "Loss/Epoch/Quant/Train": losses.avg(2),
+                    "Loss/Epoch/Total/Train": losses.avg(3),
                 },
                 epoch_idx,
             )
@@ -176,16 +189,19 @@ def train(cfg):
             )
 
         # Evaluate the current model
-        losses, key_frames = core.test(cfg, val_data_loader, network)
+        losses, key_frames = core.vqgan.test(cfg, val_data_loader, network)
         if local_rank == 0:
             tb_writer.add_scalars(
                 {
                     "Loss/Epoch/Rec/Test": losses.avg(0),
-                    "Loss/Epoch/Quant/Test": losses.avg(1),
+                    "Loss/Epoch/Seg/Test": losses.avg(1),
+                    "Loss/Epoch/Quant/Test": losses.avg(2),
+                    "Loss/Epoch/Total/Test": losses.avg(3),
                 },
                 epoch_idx,
             )
-            tb_writer.add_images(key_frames, epoch_idx)
+            if epoch_idx % cfg.TRAIN.IMG_PREVIEW_FREQ:
+                tb_writer.add_images(key_frames, epoch_idx)
             # Save ckeckpoints
             if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
                 output_path = os.path.join(

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:09:04
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 14:12:20
+# @Last Modified at: 2023-04-07 10:29:28
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/CompVis/taming-transformers
 
@@ -28,10 +28,10 @@ class VQVAE(torch.nn.Module):
         self.decoder = Decoder(cfg)
         self.quantize = VectorQuantizer(cfg)
         self.quant_conv = torch.nn.Conv2d(
-            cfg.NETWORK.VQGAN.Z_CHANNELS, cfg.NETWORK.VQGAN.EMBED_DIM, 1
+            cfg.NETWORK.VQGAN.N_Z_CHANNELS, cfg.NETWORK.VQGAN.EMBED_DIM, 1
         )
         self.post_quant_conv = torch.nn.Conv2d(
-            cfg.NETWORK.VQGAN.EMBED_DIM, cfg.NETWORK.VQGAN.Z_CHANNELS, 1
+            cfg.NETWORK.VQGAN.EMBED_DIM, cfg.NETWORK.VQGAN.N_Z_CHANNELS, 1
         )
 
     def _encode(self, x):
@@ -48,18 +48,17 @@ class VQVAE(torch.nn.Module):
     def forward(self, input):
         quant, diff, _ = self._encode(input)
         dec = self._decode(quant)
-        return {"output": dec, "loss": diff}
+        return dec, diff
 
 
 class Encoder(torch.nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        N_IN_CHANNELS = 2
         self.cfg = cfg
         self.n_resolutions = len(cfg.NETWORK.VQGAN.N_CHANNEL_FACTORS)
         # downsampling
         self.conv_in = torch.nn.Conv2d(
-            N_IN_CHANNELS,
+            cfg.NETWORK.VQGAN.N_IN_CHANNELS,
             cfg.NETWORK.VQGAN.N_CHANNEL_BASE,
             kernel_size=3,
             stride=1,
@@ -112,7 +111,7 @@ class Encoder(torch.nn.Module):
         self.norm_out = normalize(block_in)
         self.conv_out = torch.nn.Conv2d(
             block_in,
-            cfg.NETWORK.VQGAN.Z_CHANNELS,
+            cfg.NETWORK.VQGAN.N_Z_CHANNELS,
             kernel_size=3,
             stride=1,
             padding=1,
@@ -147,7 +146,6 @@ class Encoder(torch.nn.Module):
 class Decoder(torch.nn.Module):
     def __init__(self, cfg):
         super().__init__()
-        N_OUT_CHANNELS = 2
         self.cfg = cfg
         self.n_resolutions = len(cfg.NETWORK.VQGAN.N_CHANNEL_FACTORS)
 
@@ -156,7 +154,12 @@ class Decoder(torch.nn.Module):
             * cfg.NETWORK.VQGAN.N_CHANNEL_FACTORS[self.n_resolutions - 1]
         )
         cur_resolution = cfg.NETWORK.VQGAN.RESOLUTION // 2 ** (self.n_resolutions - 1)
-        self.z_shape = (1, cfg.NETWORK.VQGAN.Z_CHANNELS, cur_resolution, cur_resolution)
+        self.z_shape = (
+            1,
+            cfg.NETWORK.VQGAN.N_Z_CHANNELS,
+            cur_resolution,
+            cur_resolution,
+        )
         logging.debug(
             "Working with z of shape {} = {} dimensions.".format(
                 self.z_shape, np.prod(self.z_shape)
@@ -164,7 +167,7 @@ class Decoder(torch.nn.Module):
         )
         # z to block_in
         self.conv_in = torch.nn.Conv2d(
-            cfg.NETWORK.VQGAN.Z_CHANNELS, block_in, kernel_size=3, stride=1, padding=1
+            cfg.NETWORK.VQGAN.N_Z_CHANNELS, block_in, kernel_size=3, stride=1, padding=1
         )
         # middle
         self.mid = torch.nn.Module()
@@ -212,7 +215,11 @@ class Decoder(torch.nn.Module):
         # end
         self.norm_out = normalize(block_in)
         self.conv_out = torch.nn.Conv2d(
-            block_in, N_OUT_CHANNELS, kernel_size=3, stride=1, padding=1
+            block_in,
+            cfg.NETWORK.VQGAN.N_OUT_CHANNELS,
+            kernel_size=3,
+            stride=1,
+            padding=1,
         )
 
     def forward(self, z):

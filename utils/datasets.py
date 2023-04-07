@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 15:47:55
+# @Last Modified at: 2023-04-07 10:39:47
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -75,6 +75,13 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                         },
                     },
                     {"callback": "RandomFlip", "parameters": None},
+                    {
+                        "callback": "ToOneHot",
+                        "parameters": {
+                            "n_classes": cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+                            "ignored_classes": cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
+                        },
+                    },
                     {"callback": "ToTensor", "parameters": None},
                 ]
             )
@@ -86,6 +93,13 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                         "parameters": {
                             "height": cfg.NETWORK.VQGAN.RESOLUTION,
                             "width": cfg.NETWORK.VQGAN.RESOLUTION,
+                        },
+                    },
+                    {
+                        "callback": "ToOneHot",
+                        "parameters": {
+                            "n_classes": cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+                            "ignored_classes": cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
                         },
                     },
                     {"callback": "ToTensor", "parameters": None},

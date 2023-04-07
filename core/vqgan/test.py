@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 21:03:13
+# @Last Modified at: 2023-04-07 13:30:03
 # @Email:  root@haozhexie.com
 
 import logging
@@ -45,33 +45,46 @@ def test(cfg, test_data_loader=None, network=None):
 
     # Testing loop
     n_samples = len(test_data_loader)
-    test_losses = utils.average_meter.AverageMeter(["RecLoss", "QuantLoss"])
+    test_losses = utils.average_meter.AverageMeter(
+        ["RecLoss", "SegLoss", "QuantLoss", "TotalLoss"]
+    )
     key_frames = {}
 
     # Set up loss functions
     l1_loss = torch.nn.L1Loss()
+    ce_loss = torch.nn.CrossEntropyLoss()
 
     # Testing loop
     for idx, data in enumerate(test_data_loader):
         with torch.no_grad():
             input = utils.helpers.var_or_cuda(data["input"], network.device)
             output = utils.helpers.var_or_cuda(data["output"], network.device)
-            pred = network(input)
-            loss = l1_loss(pred["output"], output) + pred["loss"]
-            test_losses.update([loss.item(), pred["loss"]])
-
-            key_frame_prefix = "Image/%04d" % idx
-            _key_frames = utils.helpers.get_keyframes(
-                torch.cat([pred["output"], output], dim=3).squeeze()
+            pred, quant_loss = network(input)
+            rec_loss = l1_loss(pred[..., 0], output[..., 0])
+            seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
+            loss = rec_loss + seg_loss + quant_loss
+            test_losses.update(
+                [rec_loss.item(), seg_loss.item(), quant_loss.item(), loss.item()]
             )
-            for k, v in _key_frames.items():
-                _key = (
-                    "%s/%s" % (key_frame_prefix, k)
-                    if k is not None
-                    else key_frame_prefix
-                )
-                key_frames[_key] = v
 
+            key_frames["Image/%04d/HeightField" % idx] = utils.helpers.tensor_to_image(
+                torch.cat([pred[:, 0], output[:, 0]], dim=2), "HeightField"
+            )
+            key_frames["Image/%04d/SegMap" % idx] = utils.helpers.tensor_to_image(
+                torch.cat(
+                    [
+                        utils.helpers.onehot_to_mask(
+                            pred[:, 1:],
+                            cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
+                        ),
+                        utils.helpers.onehot_to_mask(
+                            output[:, 1:],
+                            cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
+                        ),
+                    ], dim=2
+                ),
+                "SegMap",
+            )
             logging.info(
                 "Test[%d/%d] Losses = %s"
                 % (idx + 1, n_samples, ["%.4f" % l for l in test_losses.val()])
