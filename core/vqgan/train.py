@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 13:30:58
+# @Last Modified at: 2023-04-07 13:43:44
 # @Email:  root@haozhexie.com
 
 import logging
@@ -200,8 +200,7 @@ def train(cfg):
                 },
                 epoch_idx,
             )
-            if epoch_idx % cfg.TRAIN.IMG_PREVIEW_FREQ:
-                tb_writer.add_images(key_frames, epoch_idx)
+            tb_writer.add_images(key_frames, epoch_idx)
             # Save ckeckpoints
             if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
                 output_path = os.path.join(

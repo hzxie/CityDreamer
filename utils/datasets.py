@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 10:39:47
+# @Last Modified at: 2023-04-07 13:39:26
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -54,7 +54,11 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
 
     def _get_cities(self, cfg, split):
         cities = sorted(os.listdir(cfg.DATASETS.OSM_LAYOUT.DIR))
-        cities = cities[:-1] if split == "train" else cities[-1:]
+        cities = (
+            cities[:-1] * cfg.DATASETS.OSM_LAYOUT.N_REPEAT
+            if split == "train"
+            else cities[-1:]
+        )
         return [
             {
                 "hf": os.path.join(cfg.DATASETS.OSM_LAYOUT.DIR, c, "hf.png"),

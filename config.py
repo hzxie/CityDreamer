@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 11:11:12
+# @Last Modified at: 2023-04-07 13:42:01
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -18,6 +18,7 @@ cfg                                              = __C
 #
 __C.DATASETS                                     = EasyDict()
 __C.DATASETS.OSM_LAYOUT                          = EasyDict()
+__C.DATASETS.OSM_LAYOUT.N_REPEAT                 = 250
 __C.DATASETS.OSM_LAYOUT.DIR                      = "./data/osm"
 __C.DATASETS.OSM_LAYOUT.N_CLASSES                = 7
 __C.DATASETS.OSM_LAYOUT.IGNORED_CLASSES          = [0]
@@ -78,9 +79,8 @@ __C.NETWORK.VQGAN.DROPOUT                        = 0.0
 __C.TRAIN                                        = EasyDict()
 __C.TRAIN.VQGAN                                  = EasyDict()
 __C.TRAIN.VQGAN.DATASET                          = "OSM_LAYOUT"
-__C.TRAIN.VQGAN.N_EPOCHS                         = 200000
-__C.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 1000
-__C.TRAIN.VQGAN.IMG_PREVIEW_FREQ                 = 500
+__C.TRAIN.VQGAN.N_EPOCHS                         = 5000
+__C.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 50
 __C.TRAIN.VQGAN.BATCH_SIZE                       = 2
 __C.TRAIN.VQGAN.BASE_LR                          = 4.5e-6
 __C.TRAIN.VQGAN.WEIGHT_DECAY                     = 0

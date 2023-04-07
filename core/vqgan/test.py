@@ -81,7 +81,8 @@ def test(cfg, test_data_loader=None, network=None):
                             output[:, 1:],
                             cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
                         ),
-                    ], dim=2
+                    ],
+                    dim=2,
                 ),
                 "SegMap",
             )
