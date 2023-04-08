@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 13:42:01
+# @Last Modified at: 2023-04-08 14:57:01
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -80,6 +80,8 @@ __C.TRAIN                                        = EasyDict()
 __C.TRAIN.VQGAN                                  = EasyDict()
 __C.TRAIN.VQGAN.DATASET                          = "OSM_LAYOUT"
 __C.TRAIN.VQGAN.N_EPOCHS                         = 5000
+__C.TRAIN.VQGAN.REC_LOSS_FACTOR                  = 10
+__C.TRAIN.VQGAN.SEG_LOSS_FACTOR                  = 1
 __C.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 50
 __C.TRAIN.VQGAN.BATCH_SIZE                       = 2
 __C.TRAIN.VQGAN.BASE_LR                          = 4.5e-6

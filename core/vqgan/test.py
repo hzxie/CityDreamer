@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 13:30:03
+# @Last Modified at: 2023-04-08 14:56:06
 # @Email:  root@haozhexie.com
 
 import logging
@@ -60,9 +60,13 @@ def test(cfg, test_data_loader=None, network=None):
             input = utils.helpers.var_or_cuda(data["input"], network.device)
             output = utils.helpers.var_or_cuda(data["output"], network.device)
             pred, quant_loss = network(input)
-            rec_loss = l1_loss(pred[..., 0], output[..., 0])
+            rec_loss = l1_loss(pred[:, 0], output[:, 0])
             seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
-            loss = rec_loss + seg_loss + quant_loss
+            loss = (
+                rec_loss * cfg.TRAIN.REC_LOSS_FACTOR
+                + seg_loss * cfg.TRAIN.SEG_LOSS_FACTOR
+                + quant_loss
+            )
             test_losses.update(
                 [rec_loss.item(), seg_loss.item(), quant_loss.item(), loss.item()]
             )

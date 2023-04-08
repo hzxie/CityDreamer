@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 10:22:39
+# @Last Modified at: 2023-04-08 14:42:52
 # @Email:  root@haozhexie.com
 
 
@@ -115,6 +115,8 @@ def main():
 if __name__ == "__main__":
     # References: https://stackoverflow.com/a/53553516/1841143
     importlib.reload(logging)
-    logging.basicConfig(format="[%(levelname)s] %(asctime)s %(message)s")
-    logging.getLogger().setLevel(logging.INFO)
+    logging.basicConfig(
+        format="[%(levelname)s] %(asctime)s %(message)s",
+        level=logging.DEBUG,
+    )
     main()
