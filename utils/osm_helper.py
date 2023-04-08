@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 13:51:05
+# @Last Modified at: 2023-04-08 15:59:15
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -283,7 +283,7 @@ def get_empty_map(xy_bounds):
             xy_bounds["ymax"] - xy_bounds["ymin"] + 1,
             xy_bounds["xmax"] - xy_bounds["xmin"] + 1,
         ),
-        dtype=np.int16,
+        dtype=np.uint8,
     )
     return map_img
 

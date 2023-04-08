@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-08 14:42:52
+# @Last Modified at: 2023-04-08 19:32:31
 # @Email:  root@haozhexie.com
 
 
@@ -117,6 +117,6 @@ if __name__ == "__main__":
     importlib.reload(logging)
     logging.basicConfig(
         format="[%(levelname)s] %(asctime)s %(message)s",
-        level=logging.DEBUG,
+        level=logging.INFO,
     )
     main()
