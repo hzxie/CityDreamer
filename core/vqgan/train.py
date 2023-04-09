@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-08 14:56:12
+# @Last Modified at: 2023-04-09 15:52:36
 # @Email:  root@haozhexie.com
 
 import logging
@@ -94,6 +94,7 @@ def train(cfg):
         logging.info("Recovering from %s ..." % (cfg.CONST.WEIGHTS))
         checkpoint = torch.load(cfg.CONST.WEIGHTS)
         network.load_state_dict(checkpoint[network_name])
+        init_epoch = checkpoint["epoch_index"]
         logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
 
     # Set up folders for logs, snapshot and checkpoints

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2020-04-19 12:52:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 19:48:53
+# @Last Modified at: 2023-04-09 15:59:26
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -23,12 +23,19 @@ class SummaryWriter(object):
     def __init__(self, cfg):
         os.makedirs(cfg.DIR.OUTPUT, exist_ok=True)
         if cfg.WANDB.ENABLED:
+            if cfg.WANDB.get("RUN_ID"):
+                logging.info("Resuming from WandB[ID=%s]" % cfg.WANDB.RUN_ID)
+            else:
+                cfg.WANDB.RUN_ID = wandb.util.generate_id()
+
             self.writer = wandb.init(
+                id=cfg.WANDB.RUN_ID,
                 entity=cfg.WANDB.ENTITY,
                 project=cfg.WANDB.PROJECT,
                 name=cfg.CONST.EXP_NAME,
                 dir=cfg.DIR.OUTPUT,
                 mode=cfg.WANDB.MODE,
+                resume="allow"
             )
         else:
             self.writer = torch.utils.tensorboard.SummaryWriter(cfg.DIR.LOGS)

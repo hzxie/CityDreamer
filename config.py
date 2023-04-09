@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-08 14:57:01
+# @Last Modified at: 2023-04-09 15:52:03
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -53,8 +53,9 @@ __C.WANDB                                        = EasyDict()
 __C.WANDB.ENABLED                                = False
 __C.WANDB.PROJECT                                = "City-Gen"
 __C.WANDB.ENTITY                                 = "haozhexie"
-__C.WANDB.MODE                                   = "offline"
-__C.WANDB.SYNC_TENSORBOARD                       = True
+__C.WANDB.MODE                                   = "online"
+__C.WANDB.RUN_ID                                 = None
+__C.WANDB.SYNC_TENSORBOARD                       = False
 
 #
 # Network

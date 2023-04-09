@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-08 19:32:31
+# @Last Modified at: 2023-04-09 15:48:08
 # @Email:  root@haozhexie.com
 
 
@@ -65,6 +65,14 @@ def get_args_from_command_line():
         help="Initialize the network from a pretrained model.",
         default=None,
     )
+    parser.add_argument(
+        "-r",
+        "--run",
+        dest="run_id",
+        help="The unique run ID for WandB",
+        default=None,
+        type=str,
+    )
     args = parser.parse_args()
     return args
 
@@ -94,6 +102,8 @@ def main():
         cfg.CONST.NETWORK = args.network
     if args.weights is not None:
         cfg.CONST.WEIGHTS = args.weights
+    if args.run_id is not None:
+        cfg.WANDB.RUN_ID = args.run_id
 
     # Start train/test processes
     if not args.test:
