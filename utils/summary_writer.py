@@ -35,7 +35,7 @@ class SummaryWriter(object):
                 name=cfg.CONST.EXP_NAME,
                 dir=cfg.DIR.OUTPUT,
                 mode=cfg.WANDB.MODE,
-                resume="allow"
+                resume="allow",
             )
         else:
             self.writer = torch.utils.tensorboard.SummaryWriter(cfg.DIR.LOGS)

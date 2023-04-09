@@ -4,12 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-09 15:52:36
+# @Last Modified at: 2023-04-09 21:07:44
 # @Email:  root@haozhexie.com
 
 import logging
 import os
 import torch
+import shutil
 
 import core.vqgan.test
 import models.vqvae
@@ -207,19 +208,22 @@ def train(cfg):
             )
             tb_writer.add_images(key_frames, epoch_idx)
             # Save ckeckpoints
+            logging.info("Saved checkpoint to ckpt-last.pth ...")
+            torch.save(
+                {
+                    "cfg": cfg,
+                    "epoch_index": epoch_idx,
+                    network_name: network.state_dict(),
+                },
+                os.path.join(cfg.DIR.CHECKPOINTS, "ckpt-last.pth"),
+            )
             if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
-                output_path = os.path.join(
-                    cfg.DIR.CHECKPOINTS, "ckpt-epoch-%06d.pth" % epoch_idx
+                shutil.copy(
+                    os.path.join(cfg.DIR.CHECKPOINTS, "ckpt-last.pth"),
+                    os.path.join(
+                        cfg.DIR.CHECKPOINTS, "ckpt-epoch-%03d.pth" % epoch_idx
+                    ),
                 )
-                torch.save(
-                    {
-                        "cfg": cfg,
-                        "epoch_index": epoch_idx,
-                        network_name: network.state_dict(),
-                    },
-                    output_path,
-                )
-                logging.info("Saved checkpoint to %s ..." % output_path)
 
     if local_rank == 0:
         tb_writer.close()
