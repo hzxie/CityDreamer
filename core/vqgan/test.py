@@ -4,12 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-08 14:56:06
+# @Last Modified at: 2023-04-10 20:19:21
 # @Email:  root@haozhexie.com
 
 import logging
 import torch
 
+import models.vqgan
 import utils.average_meter
 import utils.datasets
 import utils.helpers
@@ -18,30 +19,26 @@ import utils.helpers
 def test(cfg, test_data_loader=None, network=None):
     torch.backends.cudnn.benchmark = True
     if network is None:
-        # TODO
-        network_name = ""
-        network = None
+        vqae = models.vqgan.VQAutoEncoder(cfg)
         if torch.cuda.is_available():
-            network = torch.nn.DataParallel(network).cuda()
+            vqae = torch.nn.DataParallel(vqae).cuda()
 
-        logging.info("Recovering from %s ..." % (cfg.CONST.WEIGHTS))
-        checkpoint = torch.load(cfg.CONST.WEIGHTS)
-        network.load_state_dict(checkpoint[network_name])
-
-    # Switch models to evaluation mode
-    network.eval()
+        logging.info("Recovering from %s ..." % (cfg.CONST.CKPT_FILE_PATH))
+        checkpoint = torch.load(cfg.CONST.CKPT_FILE_PATH)
+        vqae.load_state_dict(checkpoint["vqae"])
 
     if test_data_loader is None:
-        # TODO
-        dataset_name = "OSM_LAYOUT"
         test_data_loader = torch.utils.data.DataLoader(
-            dataset=utils.datasets.get_dataset(cfg, dataset_name, "val"),
+            dataset=utils.datasets.get_dataset(cfg, "OSM_LAYOUT", "test"),
             batch_size=1,
             num_workers=cfg.CONST.N_WORKERS,
             collate_fn=utils.datasets.collate_fn,
             pin_memory=True,
             shuffle=False,
         )
+
+    # Switch models to evaluation mode
+    vqae.eval()
 
     # Testing loop
     n_samples = len(test_data_loader)
@@ -57,14 +54,14 @@ def test(cfg, test_data_loader=None, network=None):
     # Testing loop
     for idx, data in enumerate(test_data_loader):
         with torch.no_grad():
-            input = utils.helpers.var_or_cuda(data["input"], network.device)
-            output = utils.helpers.var_or_cuda(data["output"], network.device)
-            pred, quant_loss = network(input)
+            input = utils.helpers.var_or_cuda(data["input"])
+            output = utils.helpers.var_or_cuda(data["output"])
+            pred, quant_loss = vqae(input)
             rec_loss = l1_loss(pred[:, 0], output[:, 0])
             seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
             loss = (
-                rec_loss * cfg.TRAIN.REC_LOSS_FACTOR
-                + seg_loss * cfg.TRAIN.SEG_LOSS_FACTOR
+                rec_loss * cfg.TRAIN.VQGAN.REC_LOSS_FACTOR
+                + seg_loss * cfg.TRAIN.VQGAN.SEG_LOSS_FACTOR
                 + quant_loss
             )
             test_losses.update(

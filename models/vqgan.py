@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:09:04
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 10:29:28
+# @Last Modified at: 2023-04-10 19:50:27
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/CompVis/taming-transformers
 
@@ -21,7 +21,7 @@ normalize = lambda c_in: torch.nn.GroupNorm(
 )
 
 
-class VQVAE(torch.nn.Module):
+class VQAutoEncoder(torch.nn.Module):
     def __init__(self, cfg):
         super().__init__()
         self.encoder = Encoder(cfg)
@@ -83,7 +83,7 @@ class Encoder(torch.nn.Module):
                     )
                 )
                 block_in = block_out
-                if cur_resolution in cfg.NETWORK.VQGAN.ATTN_RESOLUTION:
+                if cur_resolution == cfg.NETWORK.VQGAN.ATTN_RESOLUTION:
                     attn.append(AttnBlock(block_in))
             down = torch.nn.Module()
             down.block = block
@@ -203,7 +203,7 @@ class Decoder(torch.nn.Module):
                     )
                 )
                 block_in = block_out
-                if cur_resolution in cfg.NETWORK.VQGAN.ATTN_RESOLUTION:
+                if cur_resolution == cfg.NETWORK.VQGAN.ATTN_RESOLUTION:
                     attn.append(AttnBlock(block_in))
             up = torch.nn.Module()
             up.block = block
@@ -303,7 +303,15 @@ class VectorQuantizer(torch.nn.Module):
         # reshape back to match original input shape
         z_q = einops.rearrange(z_q, "b h w c -> b c h w").contiguous()
 
-        return z_q, loss, (perplexity, min_encodings, min_encoding_indices)
+        return (
+            z_q,
+            loss,
+            {
+                "perplexity": perplexity,
+                "min_encodings": min_encodings,
+                "min_encoding_indices": min_encoding_indices,
+            },
+        )
 
     def get_codebook_entry(self, indices, shape):
         # get quantized latent vectors

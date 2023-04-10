@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-09 21:07:44
+# @Last Modified at: 2023-04-10 20:01:38
 # @Email:  root@haozhexie.com
 
 import logging
@@ -13,7 +13,7 @@ import torch
 import shutil
 
 import core.vqgan.test
-import models.vqvae
+import models.vqgan
 import utils.average_meter
 import utils.datasets
 import utils.helpers
@@ -26,24 +26,20 @@ from time import time
 def train(cfg):
     torch.backends.cudnn.benchmark = True
     # Set up networks
-    network = models.vqvae.VQVAE(cfg)
-    network_name = cfg.CONST.NETWORK
-    dataset_name = cfg.TRAIN[network_name].DATASET
+    vqae = models.vqgan.VQAutoEncoder(cfg)
+    dataset_name = cfg.TRAIN.VQGAN.DATASET
     local_rank = 0
     if torch.cuda.is_available():
         local_rank = torch.distributed.get_rank()
         logging.info(
-            "Start running the DDP %s on rank %d." % (network_name, local_rank)
+            "Start running the DDP on rank %d." % local_rank
         )
         device_id = local_rank % torch.cuda.device_count()
-        network = torch.nn.parallel.DistributedDataParallel(
-            network.to(device_id), device_ids=[device_id]
+        vqae = torch.nn.parallel.DistributedDataParallel(
+            vqae.to(device_id), device_ids=[device_id]
         )
     else:
-        network.device = torch.device("cpu")
-
-    # Current train config
-    cfg.TRAIN = cfg.TRAIN[network_name]
+        vqae.device = torch.device("cpu")
 
     # Set up data loader
     train_dataset = utils.datasets.get_dataset(cfg, dataset_name, "train")
@@ -60,7 +56,7 @@ def train(cfg):
 
     train_data_loader = torch.utils.data.DataLoader(
         dataset=train_dataset,
-        batch_size=cfg.TRAIN.BATCH_SIZE,
+        batch_size=cfg.TRAIN.VQGAN.BATCH_SIZE,
         num_workers=cfg.CONST.N_WORKERS,
         collate_fn=utils.datasets.collate_fn,
         pin_memory=False,
@@ -77,13 +73,13 @@ def train(cfg):
 
     # Set up optimizers
     optimizer = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, network.parameters()),
-        lr=cfg.TRAIN.BASE_LR * cfg.TRAIN.BATCH_SIZE * torch.cuda.device_count(),
-        weight_decay=cfg.TRAIN.WEIGHT_DECAY,
-        betas=cfg.TRAIN.BETAS,
+        filter(lambda p: p.requires_grad, vqae.parameters()),
+        lr=cfg.TRAIN.VQGAN.BASE_LR * cfg.TRAIN.VQGAN.BATCH_SIZE * torch.cuda.device_count(),
+        weight_decay=cfg.TRAIN.VQGAN.WEIGHT_DECAY,
+        betas=cfg.TRAIN.VQGAN.BETAS,
     )
     # TODO: Enable it later
-    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg.TRAIN.N_EPOCHS)
+    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg.TRAIN.VQGAN.N_EPOCHS)
 
     # Set up loss functions
     l1_loss = torch.nn.L1Loss()
@@ -92,9 +88,9 @@ def train(cfg):
     # Load the pretrained model if exists
     init_epoch = 0
     if "WEIGHTS" in cfg.CONST:
-        logging.info("Recovering from %s ..." % (cfg.CONST.WEIGHTS))
-        checkpoint = torch.load(cfg.CONST.WEIGHTS)
-        network.load_state_dict(checkpoint[network_name])
+        logging.info("Recovering from %s ..." % (cfg.CONST.CKPT_FILE_PATH))
+        checkpoint = torch.load(cfg.CONST.CKPT_FILE_PATH)
+        vqae.load_state_dict(checkpoint["vqae"])
         init_epoch = checkpoint["epoch_index"]
         logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
 
@@ -110,7 +106,7 @@ def train(cfg):
 
     # Training/Testing the network
     n_batches = len(train_data_loader)
-    for epoch_idx in range(init_epoch + 1, cfg.TRAIN.N_EPOCHS + 1):
+    for epoch_idx in range(init_epoch + 1, cfg.TRAIN.VQGAN.N_EPOCHS + 1):
         epoch_start_time = time()
         batch_time = utils.average_meter.AverageMeter()
         data_time = utils.average_meter.AverageMeter()
@@ -127,20 +123,20 @@ def train(cfg):
             data_time.update(time() - batch_end_time)
 
             try:
-                input = utils.helpers.var_or_cuda(data["input"], network.device)
-                output = utils.helpers.var_or_cuda(data["output"], network.device)
-                pred, quant_loss = network(input)
+                input = utils.helpers.var_or_cuda(data["input"], vqae.device)
+                output = utils.helpers.var_or_cuda(data["output"], vqae.device)
+                pred, quant_loss = vqae(input)
                 rec_loss = l1_loss(pred[:, 0], output[:, 0])
                 seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
                 loss = (
-                    rec_loss * cfg.TRAIN.REC_LOSS_FACTOR
-                    + seg_loss * cfg.TRAIN.SEG_LOSS_FACTOR
+                    rec_loss * cfg.TRAIN.VQGAN.REC_LOSS_FACTOR
+                    + seg_loss * cfg.TRAIN.VQGAN.SEG_LOSS_FACTOR
                     + quant_loss
                 )
                 losses.update(
                     [rec_loss.item(), seg_loss.item(), quant_loss.item(), loss.item()]
                 )
-                network.zero_grad()
+                vqae.zero_grad()
                 loss.backward()
                 optimizer.step()
             except Exception as ex:
@@ -163,7 +159,7 @@ def train(cfg):
                     "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Losses = %s"
                     % (
                         epoch_idx,
-                        cfg.TRAIN.N_EPOCHS,
+                        cfg.TRAIN.VQGAN.N_EPOCHS,
                         batch_idx + 1,
                         n_batches,
                         batch_time.val(),
@@ -188,14 +184,14 @@ def train(cfg):
                 "[Epoch %d/%d] EpochTime = %.3f (s) Losses = %s"
                 % (
                     epoch_idx,
-                    cfg.TRAIN.N_EPOCHS,
+                    cfg.TRAIN.VQGAN.N_EPOCHS,
                     epoch_end_time - epoch_start_time,
                     ["%.4f" % l for l in losses.avg()],
                 )
             )
 
         # Evaluate the current model
-        losses, key_frames = core.vqgan.test(cfg, val_data_loader, network)
+        losses, key_frames = core.vqgan.test(cfg, val_data_loader, vqae)
         if local_rank == 0:
             tb_writer.add_scalars(
                 {
@@ -213,11 +209,11 @@ def train(cfg):
                 {
                     "cfg": cfg,
                     "epoch_index": epoch_idx,
-                    network_name: network.state_dict(),
+                    "vqgan": vqae.state_dict(),
                 },
                 os.path.join(cfg.DIR.CHECKPOINTS, "ckpt-last.pth"),
             )
-            if epoch_idx % cfg.TRAIN.CKPT_SAVE_FREQ == 0:
+            if epoch_idx % cfg.TRAIN.VQGAN.CKPT_SAVE_FREQ == 0:
                 shutil.copy(
                     os.path.join(cfg.DIR.CHECKPOINTS, "ckpt-last.pth"),
                     os.path.join(
