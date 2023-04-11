@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 16:09:01
+# @Last Modified at: 2023-04-11 18:10:06
 # @Email:  root@haozhexie.com
 
 import logging
@@ -87,7 +87,7 @@ def test(cfg, vqae=None, sampler=None):
                             pred[0, 1:],
                             pred[1, 1:],
                         ],
-                        dim=1,
+                        dim=2,
                     ).unsqueeze(dim=0),
                     cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
                 ),
