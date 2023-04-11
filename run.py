@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-10 20:16:46
+# @Last Modified at: 2023-04-10 21:08:07
 # @Email:  root@haozhexie.com
 
 
@@ -94,7 +94,7 @@ def main():
     if args.network is not None:
         cfg.CONST.NETWORK = args.network
     if args.ckpt is not None:
-        cfg.CONST.CKPT_FILE_PATH = args.ckpt
+        cfg.CONST.CKPT = args.ckpt
     if args.run_id is not None:
         cfg.WANDB.RUN_ID = args.run_id
     if args.run_id is not None and args.ckpt is None:
@@ -117,7 +117,7 @@ def main():
         else:
             raise Exception("Unknown network: %s" % cfg.CONST.NETWORK)
     else:
-        if "CKPT_FILE_PATH" not in cfg.CONST or not os.path.exists(cfg.CONST.CKPT_FILE_PATH):
+        if "CKPT" not in cfg.CONST or not os.path.exists(cfg.CONST.CKPT):
             logging.error("Please specify the file path of checkpoint.")
             sys.exit(2)
 

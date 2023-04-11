@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:09:04
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-10 19:50:27
+# @Last Modified at: 2023-04-10 20:52:20
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/CompVis/taming-transformers
 
@@ -34,20 +34,20 @@ class VQAutoEncoder(torch.nn.Module):
             cfg.NETWORK.VQGAN.EMBED_DIM, cfg.NETWORK.VQGAN.N_Z_CHANNELS, 1
         )
 
-    def _encode(self, x):
+    def encode(self, x):
         h = self.encoder(x)
         h = self.quant_conv(h)
         quant, emb_loss, info = self.quantize(h)
         return quant, emb_loss, info
 
-    def _decode(self, quant):
+    def decode(self, quant):
         quant = self.post_quant_conv(quant)
         dec = self.decoder(quant)
         return dec
 
     def forward(self, input):
-        quant, diff, _ = self._encode(input)
-        dec = self._decode(quant)
+        quant, diff, _ = self.encode(input)
+        dec = self.decode(quant)
         return dec, diff
 
 

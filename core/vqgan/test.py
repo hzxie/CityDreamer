@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-10 20:19:21
+# @Last Modified at: 2023-04-10 20:32:56
 # @Email:  root@haozhexie.com
 
 import logging
@@ -23,8 +23,8 @@ def test(cfg, test_data_loader=None, network=None):
         if torch.cuda.is_available():
             vqae = torch.nn.DataParallel(vqae).cuda()
 
-        logging.info("Recovering from %s ..." % (cfg.CONST.CKPT_FILE_PATH))
-        checkpoint = torch.load(cfg.CONST.CKPT_FILE_PATH)
+        logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
+        checkpoint = torch.load(cfg.CONST.CKPT)
         vqae.load_state_dict(checkpoint["vqae"])
 
     if test_data_loader is None:

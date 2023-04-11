@@ -2,23 +2,24 @@
 #
 # @File:   train.py
 # @Author: Haozhe Xie
-# @Date:   2023-04-06 09:50:37
+# @Date:   2023-04-10 10:46:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 10:00:07
+# @Last Modified at: 2023-04-11 10:31:05
 # @Email:  root@haozhexie.com
 
 import logging
+import math
 import os
 import torch
 import shutil
 
-import core.vqgan.test
+import core.sampler.test
 import models.vqgan
+import models.sampler
 import utils.average_meter
 import utils.datasets
 import utils.helpers
 import utils.summary_writer
-
 
 from time import time
 
@@ -28,6 +29,7 @@ def train(cfg):
     # Set up networks
     local_rank = 0
     vqae = models.vqgan.VQAutoEncoder(cfg)
+    sampler = models.sampler.AbsorbingDiffusionSampler(cfg)
     if torch.cuda.is_available():
         local_rank = torch.distributed.get_rank()
         logging.info("Start running the DDP on rank %d." % local_rank)
@@ -35,63 +37,53 @@ def train(cfg):
         vqae = torch.nn.parallel.DistributedDataParallel(
             vqae.to(device_id), device_ids=[device_id]
         )
+        sampler = torch.nn.parallel.DistributedDataParallel(
+            sampler.to(device_id), device_ids=[device_id]
+        )
     else:
         vqae.device = torch.device("cpu")
+        sampler.device = torch.device("cpu")
+
+    # Load checkpoints (the ckpt of VQAE MUST provided)
+    if "CKPT" not in cfg.CONST:
+        raise Exception("The checkpoint of VQAE must be provided.")
+
+    init_epoch = 0
+    checkpoint = torch.load(cfg.CONST.CKPT)
+    vqae.load_state_dict(checkpoint["vqae"])
+    if "sampler" in checkpoint:
+        logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
+        sampler.load_state_dict(checkpoint["sampler"])
+        init_epoch = checkpoint["init_epoch"]
+        logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
 
     # Set up data loader
-    train_dataset = utils.datasets.get_dataset(cfg, cfg.TRAIN.VQGAN.DATASET, "train")
-    val_dataset = utils.datasets.get_dataset(cfg, cfg.TRAIN.VQGAN.DATASET, "val")
+    train_dataset = utils.datasets.get_dataset(cfg, cfg.TRAIN.SAMPLER.DATASET, "train")
     train_sampler = None
-    val_sampler = None
     if torch.cuda.is_available():
         train_sampler = torch.utils.data.distributed.DistributedSampler(
             train_dataset, rank=local_rank, shuffle=True, drop_last=True
         )
-        val_sampler = torch.utils.data.distributed.DistributedSampler(
-            val_dataset, rank=local_rank, shuffle=False
-        )
 
     train_data_loader = torch.utils.data.DataLoader(
         dataset=train_dataset,
-        batch_size=cfg.TRAIN.VQGAN.BATCH_SIZE,
+        batch_size=cfg.TRAIN.SAMPLER.BATCH_SIZE,
         num_workers=cfg.CONST.N_WORKERS,
         collate_fn=utils.datasets.collate_fn,
         pin_memory=False,
         sampler=train_sampler,
     )
-    val_data_loader = torch.utils.data.DataLoader(
-        dataset=val_dataset,
-        batch_size=1,
-        num_workers=cfg.CONST.N_WORKERS,
-        collate_fn=utils.datasets.collate_fn,
-        pin_memory=True,
-        sampler=val_sampler,
-    )
 
     # Set up optimizers
     optimizer = torch.optim.Adam(
-        filter(lambda p: p.requires_grad, vqae.parameters()),
-        lr=cfg.TRAIN.VQGAN.BASE_LR
-        * cfg.TRAIN.VQGAN.BATCH_SIZE
-        * torch.cuda.device_count(),
-        weight_decay=cfg.TRAIN.VQGAN.WEIGHT_DECAY,
-        betas=cfg.TRAIN.VQGAN.BETAS,
+        filter(lambda p: p.requires_grad, sampler.parameters()),
+        lr=cfg.TRAIN.SAMPLER.LR,
+        weight_decay=cfg.TRAIN.SAMPLER.WEIGHT_DECAY,
+        betas=cfg.TRAIN.SAMPLER.BETAS,
     )
-    # TODO: Enable it later
-    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg.TRAIN.VQGAN.N_EPOCHS)
 
     # Set up loss functions
-    l1_loss = torch.nn.L1Loss()
-    ce_loss = torch.nn.CrossEntropyLoss()
-
-    # Load the pretrained model if exists
-    init_epoch = 0
-    if "CKPT" in cfg.CONST:
-        logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
-        checkpoint = torch.load(cfg.CONST.CKPT)
-        vqae.load_state_dict(checkpoint["vqae"])
-        init_epoch = checkpoint["epoch_index"]
-        logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
+    ce_loss = torch.nn.CrossEntropyLoss(ignore_index=-1, reduction="none")
 
     # Set up folders for logs, snapshot and checkpoints
     output_dir = os.path.join(cfg.DIR.OUTPUT, "%s", cfg.CONST.EXP_NAME)
@@ -105,13 +97,11 @@ def train(cfg):
 
     # Training/Testing the network
     n_batches = len(train_data_loader)
-    for epoch_idx in range(init_epoch + 1, cfg.TRAIN.VQGAN.N_EPOCHS + 1):
+    for epoch_idx in range(init_epoch + 1, cfg.TRAIN.SAMPLER.N_EPOCHS + 1):
         epoch_start_time = time()
         batch_time = utils.average_meter.AverageMeter()
         data_time = utils.average_meter.AverageMeter()
-        losses = utils.average_meter.AverageMeter(
-            ["RecLoss", "SegLoss", "QuantLoss", "TotalLoss"]
-        )
+        losses = utils.average_meter.AverageMeter(["CodeIndexLoss", "Elbo", "RwElbo"])
         # Randomize the DistributedSampler
         if train_sampler:
             train_sampler.set_epoch(epoch_idx)
@@ -120,22 +110,26 @@ def train(cfg):
         for batch_idx, data in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
             data_time.update(time() - batch_end_time)
+            # TODO: Warm up
 
             input = utils.helpers.var_or_cuda(data["input"], vqae.device)
-            output = utils.helpers.var_or_cuda(data["output"], vqae.device)
-            pred, quant_loss = vqae(input)
-            rec_loss = l1_loss(pred[:, 0], output[:, 0])
-            seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
-            loss = (
-                rec_loss * cfg.TRAIN.VQGAN.REC_LOSS_FACTOR
-                + seg_loss * cfg.TRAIN.VQGAN.SEG_LOSS_FACTOR
-                + quant_loss
-            )
+            with torch.no_grad():
+                _, _, info = vqae.module.encode(input)
+
+            x_0 = info["min_encoding_indices"].reshape(cfg.TRAIN.SAMPLER.BATCH_SIZE, -1)
+            t, pt, x_0_hat_logits, x_0_ignore = sampler(x_0)
+            code_index_loss = ce_loss(x_0_hat_logits, x_0_ignore).sum(1)
+            elbo = code_index_loss / t / pt / (math.log(2) * x_0.size(1))
+            rw_elbo = (
+                (1 - (t / cfg.NETWORK.SAMPLER.TOTAL_STEPS))
+                * code_index_loss
+                / (math.log(2) * x_0.size(1))
+            ).mean()
             losses.update(
-                [rec_loss.item(), seg_loss.item(), quant_loss.item(), loss.item()]
+                [code_index_loss.mean().item(), elbo.mean().item(), rw_elbo.item()]
             )
-            vqae.zero_grad()
-            loss.backward()
+            sampler.zero_grad()
+            rw_elbo.backward()
             optimizer.step()
 
             batch_time.update(time() - batch_end_time)
@@ -143,10 +137,9 @@ def train(cfg):
             if local_rank == 0:
                 tb_writer.add_scalars(
                     {
-                        "Loss/Batch/Rec": losses.val(0),
-                        "Loss/Batch/Seg": losses.val(1),
-                        "Loss/Batch/Quant": losses.val(2),
-                        "Loss/Batch/Total": losses.val(3),
+                        "Loss/Batch/CodeIndex": losses.val(0),
+                        "Loss/Batch/ELBO": losses.val(1),
+                        "Loss/Batch/RwELBO": losses.val(2),
                     },
                     n_itr,
                 )
@@ -154,7 +147,7 @@ def train(cfg):
                     "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Losses = %s"
                     % (
                         epoch_idx,
-                        cfg.TRAIN.VQGAN.N_EPOCHS,
+                        cfg.TRAIN.SAMPLER.N_EPOCHS,
                         batch_idx + 1,
                         n_batches,
                         batch_time.val(),
@@ -168,10 +161,9 @@ def train(cfg):
         if local_rank == 0:
             tb_writer.add_scalars(
                 {
-                    "Loss/Epoch/Rec/Train": losses.avg(0),
-                    "Loss/Epoch/Seg/Train": losses.avg(1),
-                    "Loss/Epoch/Quant/Train": losses.avg(2),
-                    "Loss/Epoch/Total/Train": losses.avg(3),
+                    "Loss/Epoch/CodeIndex/Train": losses.avg(0),
+                    "Loss/Epoch/ELBO/Train": losses.avg(1),
+                    "Loss/Epoch/RwELBO/Train": losses.vavgal(2),
                 },
                 epoch_idx,
             )
@@ -186,17 +178,8 @@ def train(cfg):
             )
 
         # Evaluate the current model
-        losses, key_frames = core.vqgan.test(cfg, val_data_loader, vqae)
+        key_frames = core.sampler.test(cfg, sampler)
         if local_rank == 0:
-            tb_writer.add_scalars(
-                {
-                    "Loss/Epoch/Rec/Test": losses.avg(0),
-                    "Loss/Epoch/Seg/Test": losses.avg(1),
-                    "Loss/Epoch/Quant/Test": losses.avg(2),
-                    "Loss/Epoch/Total/Test": losses.avg(3),
-                },
-                epoch_idx,
-            )
             tb_writer.add_images(key_frames, epoch_idx)
             # Save ckeckpoints
             logging.info("Saved checkpoint to ckpt-last.pth ...")
@@ -205,10 +188,11 @@ def train(cfg):
                     "cfg": cfg,
                     "epoch_index": epoch_idx,
                     "vqae": vqae.state_dict(),
+                    "sampler": sampler.state_dict(),
                 },
                 os.path.join(cfg.DIR.CHECKPOINTS, "ckpt-last.pth"),
             )
-            if epoch_idx % cfg.TRAIN.VQGAN.CKPT_SAVE_FREQ == 0:
+            if epoch_idx % cfg.TRAIN.SAMPLER.CKPT_SAVE_FREQ == 0:
                 shutil.copy(
                     os.path.join(cfg.DIR.CHECKPOINTS, "ckpt-last.pth"),
                     os.path.join(

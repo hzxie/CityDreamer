@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-09 21:03:40
+# @Last Modified at: 2023-04-11 09:33:10
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -29,7 +29,7 @@ __C.DATASETS.OSM_LAYOUT.IGNORED_CLASSES          = [0]
 __C.CONST                                        = EasyDict()
 __C.CONST.EXP_NAME                               = ""
 __C.CONST.N_WORKERS                              = 32
-__C.CONST.NETWORK                                = "VQGAN"
+__C.CONST.NETWORK                                = None
 
 #
 # Directories
@@ -64,15 +64,22 @@ __C.NETWORK                                      = EasyDict()
 __C.NETWORK.VQGAN                                = EasyDict()
 __C.NETWORK.VQGAN.N_IN_CHANNELS                  = 7
 __C.NETWORK.VQGAN.N_OUT_CHANNELS                 = 7
-__C.NETWORK.VQGAN.N_Z_CHANNELS                   = 256
+__C.NETWORK.VQGAN.N_Z_CHANNELS                   = 512
 __C.NETWORK.VQGAN.N_EMBED                        = 512
 __C.NETWORK.VQGAN.EMBED_DIM                      = 512
 __C.NETWORK.VQGAN.N_RES_BLOCKS                   = 2
 __C.NETWORK.VQGAN.N_CHANNEL_BASE                 = 128
-__C.NETWORK.VQGAN.N_CHANNEL_FACTORS              = [1, 1, 2, 2, 4, 4]
+__C.NETWORK.VQGAN.N_CHANNEL_FACTORS              = [1, 1, 2, 2, 4]
 __C.NETWORK.VQGAN.RESOLUTION                     = 512
-__C.NETWORK.VQGAN.ATTN_RESOLUTION                = [16]
+__C.NETWORK.VQGAN.ATTN_RESOLUTION                = 32
 __C.NETWORK.VQGAN.DROPOUT                        = 0.0
+__C.NETWORK.SAMPLER                              = EasyDict()
+__C.NETWORK.SAMPLER.N_EMBED                      = 512
+__C.NETWORK.SAMPLER.N_HEAD                       = 8
+__C.NETWORK.SAMPLER.N_LAYERS                     = 24
+__C.NETWORK.SAMPLER.BLOCK_SIZE                   = cfg.NETWORK.VQGAN.ATTN_RESOLUTION ** 2
+__C.NETWORK.SAMPLER.DROPOUT                      = 0.0
+__C.NETWORK.SAMPLER.TOTAL_STEPS                  = 256
 
 #
 # Train
@@ -83,9 +90,18 @@ __C.TRAIN.VQGAN.DATASET                          = "OSM_LAYOUT"
 __C.TRAIN.VQGAN.N_EPOCHS                         = 500
 __C.TRAIN.VQGAN.REC_LOSS_FACTOR                  = 10
 __C.TRAIN.VQGAN.SEG_LOSS_FACTOR                  = 1
-__C.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 50
+__C.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 25
 __C.TRAIN.VQGAN.BATCH_SIZE                       = 2
 __C.TRAIN.VQGAN.BASE_LR                          = 4.5e-6
 __C.TRAIN.VQGAN.WEIGHT_DECAY                     = 0
 __C.TRAIN.VQGAN.BETAS                            = (0.5, 0.9)
+__C.TRAIN.SAMPLER                                = EasyDict()
+__C.TRAIN.SAMPLER.DATASET                        = "OSM_LAYOUT"
+__C.TRAIN.SAMPLER.N_EPOCHS                       = 500
+__C.TRAIN.SAMPLER.CKPT_SAVE_FREQ                 = 25
+__C.TRAIN.SAMPLER.BATCH_SIZE                     = 2
+__C.TRAIN.SAMPLER.N_WARMUP_ITERS                 = 10000
+__C.TRAIN.SAMPLER.LR                             = 2e-4
+__C.TRAIN.SAMPLER.WEIGHT_DECAY                   = 0
+__C.TRAIN.SAMPLER.BETAS                          = (0.9, 0.999)
 # fmt: on
