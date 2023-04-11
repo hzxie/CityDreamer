@@ -4,15 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 13:42:48
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 10:29:28
+# @Last Modified at: 2023-04-11 15:15:01
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/samb-t/unleashing-transformers
 
 import math
 import torch
 import torch.nn.functional as F
-
-from tqdm import tqdm
 
 
 class AbsorbingDiffusionSampler(torch.nn.Module):
@@ -62,7 +60,7 @@ class AbsorbingDiffusionSampler(torch.nn.Module):
         unmasked = torch.zeros_like(x_t, device=device).bool()
         sample_steps = list(range(1, sample_steps + 1))
 
-        for t in tqdm(reversed(sample_steps)):
+        for t in reversed(sample_steps):
             t = torch.full((n_samples,), t, device=device, dtype=torch.long)
             # where to unmask
             changes = torch.rand(x_t.shape, device=device) < 1 / t.float().unsqueeze(-1)

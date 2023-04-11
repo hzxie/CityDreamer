@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-10 20:32:56
+# @Last Modified at: 2023-04-11 16:06:11
 # @Email:  root@haozhexie.com
 
 import logging
@@ -40,18 +40,16 @@ def test(cfg, test_data_loader=None, network=None):
     # Switch models to evaluation mode
     vqae.eval()
 
+    # Set up loss functions
+    l1_loss = torch.nn.L1Loss()
+    ce_loss = torch.nn.CrossEntropyLoss()
+
     # Testing loop
     n_samples = len(test_data_loader)
     test_losses = utils.average_meter.AverageMeter(
         ["RecLoss", "SegLoss", "QuantLoss", "TotalLoss"]
     )
     key_frames = {}
-
-    # Set up loss functions
-    l1_loss = torch.nn.L1Loss()
-    ce_loss = torch.nn.CrossEntropyLoss()
-
-    # Testing loop
     for idx, data in enumerate(test_data_loader):
         with torch.no_grad():
             input = utils.helpers.var_or_cuda(data["input"])
@@ -72,18 +70,15 @@ def test(cfg, test_data_loader=None, network=None):
                 torch.cat([pred[:, 0], output[:, 0]], dim=2), "HeightField"
             )
             key_frames["Image/%04d/SegMap" % idx] = utils.helpers.tensor_to_image(
-                torch.cat(
-                    [
-                        utils.helpers.onehot_to_mask(
+                utils.helpers.onehot_to_mask(
+                    torch.cat(
+                        [
                             pred[:, 1:],
-                            cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
-                        ),
-                        utils.helpers.onehot_to_mask(
                             output[:, 1:],
-                            cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
-                        ),
-                    ],
-                    dim=2,
+                        ],
+                        dim=2,
+                    ),
+                    cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
                 ),
                 "SegMap",
             )

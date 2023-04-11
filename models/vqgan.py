@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:09:04
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-10 20:52:20
+# @Last Modified at: 2023-04-11 15:26:35
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/CompVis/taming-transformers
 
@@ -313,15 +313,8 @@ class VectorQuantizer(torch.nn.Module):
             },
         )
 
-    def get_codebook_entry(self, indices, shape):
-        # get quantized latent vectors
-        z_q = self.embedding(indices)
-        if shape is not None:
-            z_q = z_q.view(shape)
-            # reshape back to match original input shape
-            z_q = z_q.permute(0, 3, 1, 2).contiguous()
-
-        return z_q
+    def get_codebook(self):
+        return self.embedding.weight
 
 
 class Upsample(torch.nn.Module):

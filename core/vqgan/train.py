@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 10:00:07
+# @Last Modified at: 2023-04-11 16:08:46
 # @Email:  root@haozhexie.com
 
 import logging
@@ -77,8 +77,6 @@ def train(cfg):
         weight_decay=cfg.TRAIN.VQGAN.WEIGHT_DECAY,
         betas=cfg.TRAIN.VQGAN.BETAS,
     )
-    # TODO: Enable it later
-    # lr_scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, cfg.TRAIN.VQGAN.N_EPOCHS)
 
     # Set up loss functions
     l1_loss = torch.nn.L1Loss()
@@ -162,8 +160,7 @@ def train(cfg):
                         ["%.4f" % l for l in losses.val()],
                     )
                 )
-        # TODO: Enable it later
-        # lr_scheduler.step()
+
         epoch_end_time = time()
         if local_rank == 0:
             tb_writer.add_scalars(

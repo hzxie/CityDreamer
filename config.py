@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 09:33:10
+# @Last Modified at: 2023-04-11 14:19:27
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -18,6 +18,7 @@ cfg                                              = __C
 #
 __C.DATASETS                                     = EasyDict()
 __C.DATASETS.OSM_LAYOUT                          = EasyDict()
+__C.DATASETS.OSM_LAYOUT.PIN_MEMORY               = False
 __C.DATASETS.OSM_LAYOUT.N_REPEAT                 = 250
 __C.DATASETS.OSM_LAYOUT.DIR                      = "./data/osm"
 __C.DATASETS.OSM_LAYOUT.N_CLASSES                = 7
@@ -104,4 +105,12 @@ __C.TRAIN.SAMPLER.N_WARMUP_ITERS                 = 10000
 __C.TRAIN.SAMPLER.LR                             = 2e-4
 __C.TRAIN.SAMPLER.WEIGHT_DECAY                   = 0
 __C.TRAIN.SAMPLER.BETAS                          = (0.9, 0.999)
+
+#
+# Test
+#
+__C.TEST                                         = EasyDict()
+__C.TEST.SAMPLER                                 = EasyDict()
+__C.TEST.SAMPLER.N_SAMPLES                       = 2
+__C.TEST.SAMPLER.TEMPERATURES                    = [1.0, 10.0, 100.0]
 # fmt: on

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 10:31:05
+# @Last Modified at: 2023-04-11 16:08:28
 # @Email:  root@haozhexie.com
 
 import logging
@@ -110,7 +110,11 @@ def train(cfg):
         for batch_idx, data in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
             data_time.update(time() - batch_end_time)
-            # TODO: Warm up
+            # Warm up the optimizer
+            if n_itr <= cfg.TRAIN.SAMPLER.N_WARMUP_ITERS:
+                lr = cfg.TRAIN.SAMPLER.LR * n_itr / cfg.TRAIN.SAMPLER.N_WARMUP_ITERS
+                for pg in optimizer.param_groups:
+                    pg["lr"] = lr
 
             input = utils.helpers.var_or_cuda(data["input"], vqae.device)
             with torch.no_grad():
@@ -125,6 +129,10 @@ def train(cfg):
                 * code_index_loss
                 / (math.log(2) * x_0.size(1))
             ).mean()
+            if torch.isnan(rw_elbo).any():
+                logging.warning("Skipping the step with NaN loss")
+                continue
+
             losses.update(
                 [code_index_loss.mean().item(), elbo.mean().item(), rw_elbo.item()]
             )
@@ -155,15 +163,14 @@ def train(cfg):
                         ["%.4f" % l for l in losses.val()],
                     )
                 )
-        # TODO: Enable it later
-        # lr_scheduler.step()
+
         epoch_end_time = time()
         if local_rank == 0:
             tb_writer.add_scalars(
                 {
                     "Loss/Epoch/CodeIndex/Train": losses.avg(0),
                     "Loss/Epoch/ELBO/Train": losses.avg(1),
-                    "Loss/Epoch/RwELBO/Train": losses.vavgal(2),
+                    "Loss/Epoch/RwELBO/Train": losses.avg(2),
                 },
                 epoch_idx,
             )
@@ -178,7 +185,7 @@ def train(cfg):
             )
 
         # Evaluate the current model
-        key_frames = core.sampler.test(cfg, sampler)
+        key_frames = core.sampler.test(cfg, vqae, sampler)
         if local_rank == 0:
             tb_writer.add_images(key_frames, epoch_idx)
             # Save ckeckpoints
