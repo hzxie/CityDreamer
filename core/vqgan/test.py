@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 16:06:11
+# @Last Modified at: 2023-04-12 15:53:14
 # @Email:  root@haozhexie.com
 
 import logging
@@ -16,12 +16,13 @@ import utils.datasets
 import utils.helpers
 
 
-def test(cfg, test_data_loader=None, network=None):
+def test(cfg, test_data_loader=None, vqae=None):
     torch.backends.cudnn.benchmark = True
-    if network is None:
+    if vqae is None:
         vqae = models.vqgan.VQAutoEncoder(cfg)
         if torch.cuda.is_available():
             vqae = torch.nn.DataParallel(vqae).cuda()
+            vqae.device = vqae.output_device
 
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
         checkpoint = torch.load(cfg.CONST.CKPT)
@@ -52,8 +53,8 @@ def test(cfg, test_data_loader=None, network=None):
     key_frames = {}
     for idx, data in enumerate(test_data_loader):
         with torch.no_grad():
-            input = utils.helpers.var_or_cuda(data["input"])
-            output = utils.helpers.var_or_cuda(data["output"])
+            input = utils.helpers.var_or_cuda(data["input"], vqae.device)
+            output = utils.helpers.var_or_cuda(data["output"], vqae.device)
             pred, quant_loss = vqae(input)
             rec_loss = l1_loss(pred[:, 0], output[:, 0])
             seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
@@ -76,7 +77,7 @@ def test(cfg, test_data_loader=None, network=None):
                             pred[:, 1:],
                             output[:, 1:],
                         ],
-                        dim=2,
+                        dim=3,
                     ),
                     cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
                 ),
