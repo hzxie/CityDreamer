@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-08 18:04:54
+# @Last Modified at: 2023-04-13 10:23:40
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -192,14 +192,16 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     return height_field, seg_map, {"resolution": resolution, "bounds": xy_bounds}
 
 
-def get_google_earth_project_name(osm_basename, google_earth_dir):
+def get_google_earth_projects(osm_basename, google_earth_dir):
     ge_projects = os.listdir(google_earth_dir)
     osm_info = osm_basename.split("-")
     osm_country, osm_city = osm_info[0], osm_info[1]
+    projects = []
     for gp in ge_projects:
         if gp.startswith("%s-%s" % (osm_country, osm_city)):
-            return gp
-    return None
+            projects.append(gp)
+
+    return projects
 
 
 def get_google_earth_camera_poses(ge_proj_name, ge_dir):
@@ -271,6 +273,134 @@ def get_google_earth_camera_poses(ge_proj_name, ge_dir):
     return camera_poses
 
 
+def get_google_earth_aligned_seg_maps(
+    ge_project_name,
+    google_earth_dir,
+    seg_map,
+    height_field,
+    patch_size,
+    metadata,
+    zoom_level,
+    tensor_extruder,
+):
+    ge_camera_poses = get_google_earth_camera_poses(ge_project_name, google_earth_dir)
+    ge_camera_focal = (
+        ge_camera_poses["height"] / 2 / np.tan(np.deg2rad(ge_camera_poses["vfov"]))
+    )
+    ## Build semantic 3D volume
+    logging.debug("Camera Target Center: %s" % ge_camera_poses["center"]["coordinate"])
+    cx, cy = utils.osm_helper.lnglat2xy(
+        ge_camera_poses["center"]["coordinate"]["longitude"],
+        ge_camera_poses["center"]["coordinate"]["latitude"],
+        metadata["resolution"],
+        zoom_level,
+    )
+    ge_camera_poses["center"]["position"] = {
+        "x": cx - metadata["bounds"]["xmin"],
+        "y": cy - metadata["bounds"]["ymin"],
+        "z": ge_camera_poses["center"]["coordinate"]["altitude"]
+        * metadata["resolution"],
+    }
+    logging.debug(
+        "Map Information: Center=%s; Size(HxW): %s"
+        % (
+            ge_camera_poses["center"]["position"],
+            (
+                metadata["bounds"]["ymax"] - metadata["bounds"]["ymin"],
+                metadata["bounds"]["xmax"] - metadata["bounds"]["xmin"],
+            ),
+        )
+    )
+    seg_volume = tensor_extruder(
+        _get_img_patch_tensor(
+            seg_map,
+            ge_camera_poses["center"]["position"]["x"],
+            ge_camera_poses["center"]["position"]["y"],
+            patch_size,
+        ),
+        _get_img_patch_tensor(
+            height_field,
+            ge_camera_poses["center"]["position"]["x"],
+            ge_camera_poses["center"]["position"]["y"],
+            patch_size,
+        ),
+    ).squeeze()
+    logging.debug("The shape of SegVolume: %s" % (seg_volume.size(),))
+    ## Convert camera position to the voxel coordinate system
+    vol_cx, vol_cy, vol_cz = (patch_size - 1) // 2, (patch_size - 1) // 2, 0
+
+    seg_maps = []
+    for gcp in tqdm(ge_camera_poses["poses"], desc="Project: %s" % ge_project_name):
+        x, y = utils.osm_helper.lnglat2xy(
+            gcp["coordinate"]["longitude"],
+            gcp["coordinate"]["latitude"],
+            metadata["resolution"],
+            zoom_level,
+        )
+        gcp["position"] = {
+            "x": x
+            - metadata["bounds"]["xmin"]
+            - ge_camera_poses["center"]["position"]["x"]
+            + vol_cx,
+            "y": y
+            - metadata["bounds"]["ymin"]
+            - ge_camera_poses["center"]["position"]["y"]
+            + vol_cy,
+            "z": gcp["coordinate"]["altitude"] * metadata["resolution"]
+            - ge_camera_poses["center"]["position"]["z"],
+        }
+        # logging.debug("Camera parameters: %s" % gcp)
+        ## Run ray-voxel intersection
+        r"""Ray-voxel intersection CUDA kernel.
+        Note: voxel_id = 0 and depth2 = NaN if there is no intersection along the ray
+        Args:
+            voxel_t (H x W x D tensor, int32): Full 3D voxel of MC block IDs.
+            cam_ori_t (3 tensor): Camera origin.
+            cam_dir_t (3 tensor): Camera direction.
+            cam_up_t (3 tensor): Camera up vector.
+            cam_f (float): Camera focal length (in pixels).
+            cam_c  (list of 2 floats [x, y]): Camera optical center.
+            img_dims (list of 2 ints [H, W]): Camera resolution.
+            max_samples (int): Maximum number of blocks intersected along the ray before stopping.
+        Returns:
+            voxel_id (    img_dims[0] x img_dims[1] x max_samples x 1 tensor): IDs of intersected tensors
+            along each ray
+            depth2   (2 x img_dims[0] x img_dims[1] x max_samples x 1 tensor): Depths of entrance and exit
+            points for each ray-voxel intersection.
+            raydirs  (    img_dims[0] x img_dims[1] x 1 x 3 tensor): The direction of each ray.
+
+        """
+        N_MAX_SAMPLES = 6
+        voxel_id, depth2, raydirs = voxlib.ray_voxel_intersection_perspective(
+            seg_volume,
+            torch.tensor(
+                [gcp["position"]["y"], gcp["position"]["x"], gcp["position"]["z"]],
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [
+                    vol_cy - gcp["position"]["y"],
+                    vol_cx - gcp["position"]["x"],
+                    vol_cz - gcp["position"]["z"],
+                ],
+                dtype=torch.float32,
+            ),
+            torch.tensor([0, 0, 1], dtype=torch.float32),
+            ge_camera_focal,
+            [
+                (ge_camera_poses["height"] - 1) / 2.0,
+                (ge_camera_poses["width"] - 1) / 2.0,
+            ],
+            [ge_camera_poses["height"], ge_camera_poses["width"]],
+            N_MAX_SAMPLES,
+        )
+        # print(voxel_id.size())    # torch.Size([540, 960, 10, 1])
+        seg_map = utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy())
+        seg_maps.append(seg_map)
+
+    return seg_maps
+
+
 def _get_img_patch_tensor(img, cx, cy, patch_size):
     h, w = img.shape
     x_s, x_e = cx - patch_size // 2, cx + patch_size // 2
@@ -291,149 +421,47 @@ def _get_img_patch_tensor(img, cx, cy, patch_size):
     )
 
 
-def main(osm_dir, google_earth_dir, patch_size, max_height, zoom_level):
+def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_level):
     osm_files = sorted([f for f in os.listdir(osm_dir) if f.endswith(".osm")])
     tensor_extruder = TensorExtruder(max_height)
     for of in tqdm(osm_files):
         basename, _ = os.path.splitext(of)
+        if basename != "US-NewYork":
+            continue
         # Create folder for the OSM
-        _osm_dir = os.path.join(osm_dir, basename)
-        os.makedirs(_osm_dir, exist_ok=True)
+        _output_dir = os.path.join(output_dir, basename)
+        os.makedirs(_output_dir, exist_ok=True)
         # Rasterisation
         height_field, seg_map, metadata = get_osm_images(
-            os.path.join(osm_dir, of), os.path.join(_osm_dir, "tiles.png"), zoom_level
+            os.path.join(osm_dir, of), os.path.join(_output_dir, "tiles.png"), zoom_level
         )
-        Image.fromarray(height_field).save(os.path.join(_osm_dir, "hf.png"))
-        utils.helpers.get_seg_map(seg_map).save(os.path.join(_osm_dir, "seg.png"))
+        Image.fromarray(height_field).save(os.path.join(_output_dir, "hf.png"))
+        utils.helpers.get_seg_map(seg_map).save(os.path.join(_output_dir, "seg.png"))
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")
-        _ge_proj_name = get_google_earth_project_name(basename, google_earth_dir)
-        if _ge_proj_name is None:
+        ge_projects = get_google_earth_projects(basename, google_earth_dir)
+        if not ge_projects:
             logging.warning(
                 "No matching Google Earth Project found for OSM[File=%s]." % of
             )
             continue
         ## Read Google Earth Studio metadata
-        ge_camera_poses = get_google_earth_camera_poses(_ge_proj_name, google_earth_dir)
-        ge_camera_focal = (
-            ge_camera_poses["height"] / 2 / np.tan(np.deg2rad(ge_camera_poses["vfov"]))
-        )
-        ## Build semantic 3D volume
-        logging.debug(
-            "Camera Target Center: %s" % ge_camera_poses["center"]["coordinate"]
-        )
-        cx, cy = utils.osm_helper.lnglat2xy(
-            ge_camera_poses["center"]["coordinate"]["longitude"],
-            ge_camera_poses["center"]["coordinate"]["latitude"],
-            metadata["resolution"],
-            zoom_level,
-        )
-        ge_camera_poses["center"]["position"] = {
-            "x": cx - metadata["bounds"]["xmin"],
-            "y": cy - metadata["bounds"]["ymin"],
-            "z": ge_camera_poses["center"]["coordinate"]["altitude"]
-            * metadata["resolution"],
-        }
-        logging.debug(
-            "Map Information: Center=%s; Size(HxW): %s"
-            % (
-                ge_camera_poses["center"]["position"],
-                (
-                    metadata["bounds"]["ymax"] - metadata["bounds"]["ymin"],
-                    metadata["bounds"]["xmax"] - metadata["bounds"]["xmin"],
-                ),
-            )
-        )
-        seg_volume = tensor_extruder(
-            _get_img_patch_tensor(
+        for gep in ge_projects:
+            seg_maps = get_google_earth_aligned_seg_maps(
+                gep,
+                google_earth_dir,
                 seg_map,
-                ge_camera_poses["center"]["position"]["x"],
-                ge_camera_poses["center"]["position"]["y"],
-                patch_size,
-            ),
-            _get_img_patch_tensor(
                 height_field,
-                ge_camera_poses["center"]["position"]["x"],
-                ge_camera_poses["center"]["position"]["y"],
                 patch_size,
-            ),
-        ).squeeze()
-        logging.debug("The shape of SegVolume: %s" % (seg_volume.size(),))
-        ## Convert camera position to the voxel coordinate system
-        vol_cx, vol_cy, vol_cz = (patch_size - 1) // 2, (patch_size - 1) // 2, 0
-        for idx, gcp in enumerate(
-            tqdm(ge_camera_poses["poses"], desc="Project: %s" % _ge_proj_name)
-        ):
-            x, y = utils.osm_helper.lnglat2xy(
-                gcp["coordinate"]["longitude"],
-                gcp["coordinate"]["latitude"],
-                metadata["resolution"],
+                metadata,
                 zoom_level,
+                tensor_extruder,
             )
-            gcp["position"] = {
-                "x": x
-                - metadata["bounds"]["xmin"]
-                - ge_camera_poses["center"]["position"]["x"]
-                + vol_cx,
-                "y": y
-                - metadata["bounds"]["ymin"]
-                - ge_camera_poses["center"]["position"]["y"]
-                + vol_cy,
-                "z": gcp["coordinate"]["altitude"] * metadata["resolution"]
-                - ge_camera_poses["center"]["position"]["z"],
-            }
-            # logging.debug("Camera parameters: %s" % gcp)
-            ## Run ray-voxel intersection
-            r"""Ray-voxel intersection CUDA kernel.
-            Note: voxel_id = 0 and depth2 = NaN if there is no intersection along the ray
-            Args:
-                voxel_t (H x W x D tensor, int32): Full 3D voxel of MC block IDs.
-                cam_ori_t (3 tensor): Camera origin.
-                cam_dir_t (3 tensor): Camera direction.
-                cam_up_t (3 tensor): Camera up vector.
-                cam_f (float): Camera focal length (in pixels).
-                cam_c  (list of 2 floats [x, y]): Camera optical center.
-                img_dims (list of 2 ints [H, W]): Camera resolution.
-                max_samples (int): Maximum number of blocks intersected along the ray before stopping.
-            Returns:
-                voxel_id (    img_dims[0] x img_dims[1] x max_samples x 1 tensor): IDs of intersected tensors
-                along each ray
-                depth2   (2 x img_dims[0] x img_dims[1] x max_samples x 1 tensor): Depths of entrance and exit
-                points for each ray-voxel intersection.
-                raydirs  (    img_dims[0] x img_dims[1] x 1 x 3 tensor): The direction of each ray.
-
-            """
-            N_MAX_SAMPLES = 6
-            voxel_id, depth2, raydirs = voxlib.ray_voxel_intersection_perspective(
-                seg_volume,
-                torch.tensor(
-                    [gcp["position"]["y"], gcp["position"]["x"], gcp["position"]["z"]],
-                    dtype=torch.float32,
-                ),
-                torch.tensor(
-                    [
-                        vol_cy - gcp["position"]["y"],
-                        vol_cx - gcp["position"]["x"],
-                        vol_cz - gcp["position"]["z"],
-                    ],
-                    dtype=torch.float32,
-                ),
-                torch.tensor([0, 0, 1], dtype=torch.float32),
-                ge_camera_focal,
-                [
-                    (ge_camera_poses["height"] - 1) / 2.0,
-                    (ge_camera_poses["width"] - 1) / 2.0,
-                ],
-                [ge_camera_poses["height"], ge_camera_poses["width"]],
-                N_MAX_SAMPLES,
-            )
-            # print(voxel_id.size())    # torch.Size([540, 960, 10, 1])
             # Generate the corresponding segmentation images
-            ges_seg_dir = os.path.join(google_earth_dir, _ge_proj_name, "seg")
+            ges_seg_dir = os.path.join(google_earth_dir, gep, "seg")
             os.makedirs(ges_seg_dir, exist_ok=True)
-            utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy()).save(
-                os.path.join(ges_seg_dir, "%s-%04d.png" % (_ge_proj_name, idx))
-            )
+            for idx, sg in enumerate(seg_maps):
+                sg.save(os.path.join(ges_seg_dir, "%s-%04d.png" % (gep, idx)))
 
 
 if __name__ == "__main__":
@@ -444,10 +472,15 @@ if __name__ == "__main__":
         level=logging.DEBUG,
     )
     parser = argparse.ArgumentParser()
-    parser.add_argument("--osm_dir", default=os.path.join(PROJECT_HOME, "data", "osm"))
+    parser.add_argument(
+        "--osm_dir", default=os.path.join(PROJECT_HOME, "data", "osm", "xml")
+    )
     parser.add_argument("--ges_dir", default=os.path.join(PROJECT_HOME, "data", "ges"))
+    parser.add_argument(
+        "--output_dir", default=os.path.join(PROJECT_HOME, "data", "osm")
+    )
     parser.add_argument("--patch_size", default=1024)
     parser.add_argument("--max_height", default=256)
     parser.add_argument("--zoom", default=18)
     args = parser.parse_args()
-    main(args.osm_dir, args.ges_dir, args.patch_size, args.max_height, args.zoom)
+    main(args.osm_dir, args.ges_dir, args.output_dir, args.patch_size, args.max_height, args.zoom)

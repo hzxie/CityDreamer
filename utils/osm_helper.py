@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-08 15:59:15
+# @Last Modified at: 2023-04-13 10:21:28
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -174,8 +174,8 @@ def _get_numeric_values(key, value, max_value):
         inch = inch.group()[:-1] if inch else 0
         new_value = float(feet) * 0.3048 + float(inch) * 0.0254
         # logging.debug("Origin: %s, Feet: %s, Inch: %s" % (value, feet, inch))
-    elif re.match("^[0-9]+(\s)*f(ee)?t$", value):
-        new_value = int(re.match("[0-9]+", value).group()) * 0.3048
+    elif re.match("^[0-9]+(\.[0-9]+)?(\s)*f(ee)?t$", value):
+        new_value = float(re.match("[0-9]+(\.[0-9]+)?", value).group()) * 0.3048
     else:
         # Extract values from string
         values = [
