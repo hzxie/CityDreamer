@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-13 10:21:28
+# @Last Modified at: 2023-04-13 21:35:38
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -277,13 +277,13 @@ def get_nodes_xy_coordinates(nodes, resolution, zoom_level):
     return nodes
 
 
-def get_empty_map(xy_bounds):
+def get_empty_map(xy_bounds, dtype=np.uint8):
     map_img = np.zeros(
         (
             xy_bounds["ymax"] - xy_bounds["ymin"] + 1,
             xy_bounds["xmax"] - xy_bounds["xmin"] + 1,
         ),
-        dtype=np.uint8,
+        dtype=dtype,
     )
     return map_img
 
@@ -360,7 +360,7 @@ def plot_highways(
 
 
 def plot_footprints(
-    map_name, colormap, map_img, footprints, footprint_nodes, xy_bounds
+    map_name, colormap, map_img, footprints, footprint_nodes, xy_bounds, resolution=None
 ):
     for _, values in footprints.items():
         way_nodes = []
@@ -371,11 +371,21 @@ def plot_footprints(
             )
         # color is None for ignored footprints
         color = colormap(map_name, values["tags"])
-        if color is not None:
+        if color is None:
+            continue
+        if resolution is None:
             cv2.fillPoly(
                 map_img,
                 [np.int32(way_nodes)],
                 color=color,
+            )
+        else:
+            cv2.polylines(
+                map_img,
+                [np.int32(way_nodes)],
+                isClosed=True,
+                color=colormap(map_name, values["tags"]),
+                thickness=1,
             )
 
     return map_img

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-13 10:23:40
+# @Last Modified at: 2023-04-13 21:41:12
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -72,6 +72,11 @@ def _get_footprint_color(map_name, footprint_tags):
             return 2
         elif _tag_equals(footprint_tags, "landuse", ["construction"]):
             return 4
+        else:
+            return 0
+    elif map_name == "footprint_contour":
+        if _tag_equals(footprint_tags, "building"):
+            return 1
         else:
             return 0
     else:
@@ -159,6 +164,19 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     # Assign ID=6 to unlabelled pixels (regarded as ground)
     seg_map[seg_map == 0] = 6
 
+    # Generate the contours of footprints
+    logging.debug("Generating footprint contours ...")
+    footprint_contour = utils.osm_helper.get_empty_map(xy_bounds)
+    footprint_contour = utils.osm_helper.plot_footprints(
+        "footprint_contour",
+        _get_footprint_color,
+        footprint_contour,
+        footprints,
+        nodes,
+        xy_bounds,
+        resolution,
+    )
+
     # Generate height fields
     logging.debug("Generating height fields ...")
     height_field = utils.osm_helper.get_empty_map(xy_bounds)
@@ -189,7 +207,12 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     assert height_field.all() >= 0 and height_field.all() < 256
     height_field = (height_field * resolution).astype(np.uint8)
 
-    return height_field, seg_map, {"resolution": resolution, "bounds": xy_bounds}
+    return (
+        height_field,
+        seg_map,
+        footprint_contour,
+        {"resolution": resolution, "bounds": xy_bounds},
+    )
 
 
 def get_google_earth_projects(osm_basename, google_earth_dir):
@@ -426,20 +449,24 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
     tensor_extruder = TensorExtruder(max_height)
     for of in tqdm(osm_files):
         basename, _ = os.path.splitext(of)
-        if basename != "US-NewYork":
-            continue
         # Create folder for the OSM
         _output_dir = os.path.join(output_dir, basename)
         os.makedirs(_output_dir, exist_ok=True)
         # Rasterisation
-        height_field, seg_map, metadata = get_osm_images(
-            os.path.join(osm_dir, of), os.path.join(_output_dir, "tiles.png"), zoom_level
+        height_field, seg_map, contours, metadata = get_osm_images(
+            os.path.join(osm_dir, of),
+            os.path.join(_output_dir, "tiles.png"),
+            zoom_level,
         )
         Image.fromarray(height_field).save(os.path.join(_output_dir, "hf.png"))
+        Image.fromarray(contours.astype(bool)).save(
+            os.path.join(_output_dir, "ctr.png")
+        )
         utils.helpers.get_seg_map(seg_map).save(os.path.join(_output_dir, "seg.png"))
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")
-        ge_projects = get_google_earth_projects(basename, google_earth_dir)
+        # TODO: Temperorily skip
+        ge_projects = []  # get_google_earth_projects(basename, google_earth_dir)
         if not ge_projects:
             logging.warning(
                 "No matching Google Earth Project found for OSM[File=%s]." % of
@@ -483,4 +510,11 @@ if __name__ == "__main__":
     parser.add_argument("--max_height", default=256)
     parser.add_argument("--zoom", default=18)
     args = parser.parse_args()
-    main(args.osm_dir, args.ges_dir, args.output_dir, args.patch_size, args.max_height, args.zoom)
+    main(
+        args.osm_dir,
+        args.ges_dir,
+        args.output_dir,
+        args.patch_size,
+        args.max_height,
+        args.zoom,
+    )

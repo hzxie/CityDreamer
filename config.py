@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 14:19:27
+# @Last Modified at: 2023-04-14 10:19:17
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -63,8 +63,8 @@ __C.WANDB.SYNC_TENSORBOARD                       = False
 #
 __C.NETWORK                                      = EasyDict()
 __C.NETWORK.VQGAN                                = EasyDict()
-__C.NETWORK.VQGAN.N_IN_CHANNELS                  = 7
-__C.NETWORK.VQGAN.N_OUT_CHANNELS                 = 7
+__C.NETWORK.VQGAN.N_IN_CHANNELS                  = 8
+__C.NETWORK.VQGAN.N_OUT_CHANNELS                 = 8
 __C.NETWORK.VQGAN.N_Z_CHANNELS                   = 512
 __C.NETWORK.VQGAN.N_EMBED                        = 512
 __C.NETWORK.VQGAN.EMBED_DIM                      = 512
@@ -90,6 +90,7 @@ __C.TRAIN.VQGAN                                  = EasyDict()
 __C.TRAIN.VQGAN.DATASET                          = "OSM_LAYOUT"
 __C.TRAIN.VQGAN.N_EPOCHS                         = 500
 __C.TRAIN.VQGAN.REC_LOSS_FACTOR                  = 10
+__C.TRAIN.VQGAN.CTR_LOSS_FACTOR                  = 10
 __C.TRAIN.VQGAN.SEG_LOSS_FACTOR                  = 1
 __C.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 25
 __C.TRAIN.VQGAN.BATCH_SIZE                       = 2
@@ -112,5 +113,5 @@ __C.TRAIN.SAMPLER.BETAS                          = (0.9, 0.999)
 __C.TEST                                         = EasyDict()
 __C.TEST.SAMPLER                                 = EasyDict()
 __C.TEST.SAMPLER.N_SAMPLES                       = 2
-__C.TEST.SAMPLER.TEMPERATURES                    = [1.0, 10.0, 100.0]
+__C.TEST.SAMPLER.TEMPERATURES                    = [0.5, 1.0, 2.0]
 # fmt: on

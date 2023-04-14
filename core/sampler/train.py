@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 16:08:28
+# @Last Modified at: 2023-04-14 10:22:22
 # @Email:  root@haozhexie.com
 
 import logging
@@ -54,7 +54,7 @@ def train(cfg):
     if "sampler" in checkpoint:
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
         sampler.load_state_dict(checkpoint["sampler"])
-        init_epoch = checkpoint["init_epoch"]
+        init_epoch = checkpoint["epoch_index"]
         logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
 
     # Set up data loader

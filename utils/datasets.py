@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 15:53:44
+# @Last Modified at: 2023-04-14 10:04:16
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -59,12 +59,14 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
         hf, seg = None, None
         if self.cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY:
             hf = city["hf"]
+            ctr = city["ctr"]
             seg = city["seg"]
         else:
             hf = self._get_height_field(city["hf"])
-            seg = self._get_height_field(city["seg"])
+            ctr = self._get_footprint_contour(city["ctr"])
+            seg = self._get_seg_map(city["seg"])
 
-        img = self.transforms(np.stack([hf, seg], axis=2))
+        img = self.transforms(np.stack([hf, ctr, seg], axis=2))
         return {"input": img, "output": img}
 
     def _get_cities(self, cfg, split):
@@ -73,6 +75,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
         files = [
             {
                 "hf": os.path.join(cfg.DATASETS.OSM_LAYOUT.DIR, c, "hf.png"),
+                "ctr": os.path.join(cfg.DATASETS.OSM_LAYOUT.DIR, c, "ctr.png"),
                 "seg": os.path.join(cfg.DATASETS.OSM_LAYOUT.DIR, c, "seg.png"),
             }
             for c in cities
@@ -83,13 +86,21 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
         return [
             {
                 "hf": self._get_height_field(f["hf"]),
+                "ctr": self._get_footprint_contour(f["ctr"]),
                 "seg": self._get_seg_map(f["seg"]),
             }
             for f in tqdm(files, desc="Loading OSMLayout to RAM")
         ]
 
     def _get_height_field(self, hf_file_path):
+        if utils.io.IO.get(hf_file_path) is None:
+            import logging
+
+            logging.error(hf_file_path)
         return np.array(utils.io.IO.get(hf_file_path)) / 255.0
+
+    def _get_footprint_contour(self, footprint_ctr_file_path):
+        return np.array(utils.io.IO.get(footprint_ctr_file_path).convert("L")) / 255.0
 
     def _get_seg_map(self, seg_map_file_path):
         return np.array(utils.io.IO.get(seg_map_file_path).convert("P"))

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 20:03:32
+# @Last Modified at: 2023-04-14 10:10:00
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -68,10 +68,12 @@ def onehot_to_mask(onehot, ignored_classes=[]):
 
 
 def tensor_to_image(tensor, mode):
-    # assert mode in ["HeightField", "SegMap"]
+    # assert mode in ["HeightField", "FootprintCtr", "SegMap"]
     tensor = tensor.permute(1, 2, 0).cpu().numpy()
     if mode == "HeightField":
         return tensor.squeeze() / np.max(tensor)
+    elif mode == "FootprintCtr":
+        return tensor.squeeze()
     elif mode == "SegMap":
         return get_seg_map(tensor.squeeze()).convert("RGB")
     else:

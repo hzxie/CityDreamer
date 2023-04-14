@@ -4,11 +4,12 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 18:10:06
+# @Last Modified at: 2023-04-14 10:18:08
 # @Email:  root@haozhexie.com
 
 import logging
 import torch
+import torch.nn.functional as F
 
 import models.vqgan
 import models.sampler
@@ -80,12 +81,18 @@ def test(cfg, vqae=None, sampler=None):
                 torch.cat([pred[0, 0], pred[1, 0]], dim=1).unsqueeze(dim=0),
                 "HeightField",
             )
+            key_frames["Image/T=%d/FootprintCtr" % t] = utils.helpers.tensor_to_image(
+                torch.cat(
+                    [F.sigmoid(pred[0, 1]), F.sigmoid(pred[1, 1])], dim=1
+                ).unsqueeze(dim=0),
+                "FootprintCtr",
+            )
             key_frames["Image/T=%d/SegMap" % t] = utils.helpers.tensor_to_image(
                 utils.helpers.onehot_to_mask(
                     torch.cat(
                         [
-                            pred[0, 1:],
-                            pred[1, 1:],
+                            pred[0, 2:],
+                            pred[1, 2:],
                         ],
                         dim=2,
                     ).unsqueeze(dim=0),

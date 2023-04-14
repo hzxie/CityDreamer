@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-07 10:49:52
+# @Last Modified at: 2023-04-13 21:53:28
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -116,11 +116,11 @@ class ToOneHot(object):
         self.ignored_classes = parameters["ignored_classes"]
 
     def _to_onehot(self, img):
-        assert img.shape[2] == 2
+        assert img.shape[2] == 3
         mask = utils.helpers.mask_to_onehot(
-            img[..., 1], self.n_classes, self.ignored_classes
+            img[..., 2], self.n_classes, self.ignored_classes
         )
-        return np.concatenate([img[..., 0][..., None], mask], axis=2)
+        return np.concatenate([img[..., :2], mask], axis=2)
 
     def __call__(self, img):
         if type(img) == list:
