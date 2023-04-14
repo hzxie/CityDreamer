@@ -4,13 +4,12 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-14 10:19:38
+# @Last Modified at: 2023-04-14 10:42:56
 # @Email:  root@haozhexie.com
 
 import logging
 import os
 import torch
-import torch.nn.functional as F
 import shutil
 
 import core.vqgan.test
@@ -125,7 +124,7 @@ def train(cfg):
             output = utils.helpers.var_or_cuda(data["output"], vqae.device)
             pred, quant_loss = vqae(input)
             rec_loss = l1_loss(pred[:, 0], output[:, 0])
-            ctr_loss = bce_loss(F.sigmoid(pred[:, 1]), output[:, 1])
+            ctr_loss = bce_loss(torch.sigmoid(pred[:, 1]), output[:, 1])
             seg_loss = ce_loss(pred[:, 2:], torch.argmax(output[:, 2:], dim=1))
             loss = (
                 rec_loss * cfg.TRAIN.VQGAN.REC_LOSS_FACTOR

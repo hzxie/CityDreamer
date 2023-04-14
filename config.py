@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-14 10:19:17
+# @Last Modified at: 2023-04-14 10:31:58
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -101,8 +101,8 @@ __C.TRAIN.SAMPLER                                = EasyDict()
 __C.TRAIN.SAMPLER.DATASET                        = "OSM_LAYOUT"
 __C.TRAIN.SAMPLER.N_EPOCHS                       = 500
 __C.TRAIN.SAMPLER.CKPT_SAVE_FREQ                 = 25
-__C.TRAIN.SAMPLER.BATCH_SIZE                     = 2
-__C.TRAIN.SAMPLER.N_WARMUP_ITERS                 = 10000
+__C.TRAIN.SAMPLER.BATCH_SIZE                     = 10
+__C.TRAIN.SAMPLER.N_WARMUP_ITERS                 = 7500
 __C.TRAIN.SAMPLER.LR                             = 2e-4
 __C.TRAIN.SAMPLER.WEIGHT_DECAY                   = 0
 __C.TRAIN.SAMPLER.BETAS                          = (0.9, 0.999)
