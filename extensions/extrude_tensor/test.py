@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-26 19:23:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-05 09:50:40
+# @Last Modified at: 2023-04-15 10:47:53
 # @Email:  root@haozhexie.com
 
 # Mayavi off screen rendering
@@ -30,7 +30,7 @@ sys.path.append(
         os.path.join(os.path.dirname(__file__), os.path.pardir, os.path.pardir)
     )
 )
-from extensions.cu_extrude_tensor import ExtrudeTensorFunction
+from extensions.extrude_tensor import ExtrudeTensorFunction
 
 # Disable the warning message for PIL decompression bomb
 # Ref: https://stackoverflow.com/questions/25705773/image-cropping-tool-python
