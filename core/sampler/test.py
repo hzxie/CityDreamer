@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-14 10:39:02
+# @Last Modified at: 2023-04-18 15:49:55
 # @Email:  root@haozhexie.com
 
 import logging
@@ -82,9 +82,9 @@ def test(cfg, vqae=None, sampler=None):
                 "HeightField",
             )
             key_frames["Image/T=%d/FootprintCtr" % t] = utils.helpers.tensor_to_image(
-                torch.cat(
-                    [torch.sigmoid(pred[0, 1]), torch.sigmoid(pred[1, 1])], dim=1
-                ).unsqueeze(dim=0),
+                torch.cat([torch.sigmoid(pred[0, 1]), pred[1, 1]], dim=1).unsqueeze(
+                    dim=0
+                ),
                 "FootprintCtr",
             )
             key_frames["Image/T=%d/SegMap" % t] = utils.helpers.tensor_to_image(

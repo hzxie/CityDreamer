@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-14 10:38:58
+# @Last Modified at: 2023-04-18 15:49:57
 # @Email:  root@haozhexie.com
 
 import logging
@@ -77,10 +77,10 @@ def test(cfg, test_data_loader=None, vqae=None):
             )
 
             key_frames["Image/%04d/HeightField" % idx] = utils.helpers.tensor_to_image(
-                torch.cat([pred[:, 0], output[:, 0]], dim=2), "HeightField"
+                torch.cat([pred[:, [0]], output[:, [0]]], dim=3), "HeightField"
             )
             key_frames["Image/%04d/FootprintCtr" % idx] = utils.helpers.tensor_to_image(
-                torch.cat([torch.sigmoid(pred[:, 1]), torch.sigmoid(output[:, 1])], dim=2),
+                torch.cat([torch.sigmoid(pred[:, [1]]), output[:, [1]]], dim=3),
                 "FootprintCtr",
             )
             key_frames["Image/%04d/SegMap" % idx] = utils.helpers.tensor_to_image(
