@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-18 15:45:23
+# @Last Modified at: 2023-04-18 15:54:29
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -205,7 +205,6 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     # The height values should be normalized using the same scale as that of the width and height 
     # dimensions. However, the following statement results in incorrect outputs. Quite STRANGE!
     # height_field = (height_field / resolution).astype(np.uint16)
-    print(np.min(height_field), np.max(height_field))
     height_field = height_field.astype(np.uint16)
     return (
         height_field,
@@ -533,8 +532,8 @@ if __name__ == "__main__":
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, "data", "osm")
     )
-    parser.add_argument("--patch_size", default=1280)
-    parser.add_argument("--max_height", default=650)
+    parser.add_argument("--patch_size", default=1536)
+    parser.add_argument("--max_height", default=640)
     parser.add_argument("--zoom", default=18)
     args = parser.parse_args()
     main(

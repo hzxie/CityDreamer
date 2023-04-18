@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-17 10:56:00
+# @Last Modified at: 2023-04-18 15:54:36
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -23,7 +23,7 @@ cfg.DATASETS.OSM_LAYOUT.N_REPEAT                 = 250
 cfg.DATASETS.OSM_LAYOUT.DIR                      = "./data/osm"
 cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES          = [0]
 cfg.DATASETS.OSM_LAYOUT.N_CLASSES                = 7
-cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT               = 256
+cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT               = 640
 
 #
 # Constants
