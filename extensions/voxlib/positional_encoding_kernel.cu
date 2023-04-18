@@ -212,7 +212,10 @@ torch::Tensor positional_encoding_cuda(const torch::Tensor &in_feature,
       <<<dimGrid, dimBlock, 0, stream>>>(out_feature.data_ptr<float>(),
                                          in_feature.data_ptr<float>(), p);
 
-  TORCH_CHECK(cudaGetLastError());
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    printf("Error in extrude_tensor_ext_cuda_forward: %s\n", cudaGetErrorString(err));
+  }
   return out_feature;
 }
 
@@ -308,6 +311,9 @@ positional_encoding_backward_cuda(const torch::Tensor &out_feature_grad_,
                                          out_feature_grad.data_ptr<float>(),
                                          out_feature.data_ptr<float>(), p);
 
-  TORCH_CHECK(cudaGetLastError());
+  cudaError_t err = cudaGetLastError();
+  if (err != cudaSuccess) {
+    printf("Error in extrude_tensor_ext_cuda_forward: %s\n", cudaGetErrorString(err));
+  }
   return in_feature_grad;
 }

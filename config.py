@@ -4,13 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-15 15:44:45
+# @Last Modified at: 2023-04-17 10:56:00
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
 
 # fmt: off
-cfg                                              = EasyDict()
+__C                                             = EasyDict()
+cfg                                             = __C
 
 #
 # Dataset Config
