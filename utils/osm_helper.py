@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-13 21:35:38
+# @Last Modified at: 2023-04-17 13:54:43
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -248,7 +248,9 @@ def get_footprints(xml_file_path, footprint_tags=[], footprint_nodes=None):
 
 
 def get_map_resolution(lnglat_bounds, zoom_level):
-    # Reference: https://stackoverflow.com/questions/44223387/how-much-longitude-and-latitude-does-a-pixel-represent-in-google-maps-with-zero
+    # Reference:
+    # - https://stackoverflow.com/questions/44223387/how-much-longitude-and-latitude-does-a-pixel-represent-in-google-maps-with-zero
+    # - https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
     return (
         156543.03
         * math.cos(
@@ -258,12 +260,12 @@ def get_map_resolution(lnglat_bounds, zoom_level):
     )
 
 
-def lnglat2xy(lng, lat, resolution, zoom_level, tile_size=256):
+def lnglat2xy(lng, lat, resolution, zoom_level, tile_size=256, dtype=int):
     # Ref: https://wiki.openstreetmap.org/wiki/Slippy_map_tilenames
     n = 2.0**zoom_level
     x = (lng + 180.0) / 360.0 * n * tile_size
     y = (1.0 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2.0 * n * tile_size
-    return (int(x * resolution), int(y * resolution))
+    return (dtype(x * resolution), dtype(y * resolution))
 
 
 def get_nodes_xy_coordinates(nodes, resolution, zoom_level):
@@ -323,7 +325,14 @@ def get_footprint_height_stat(footprints):
 
 def fix_missing_footprint_height(footprints, footprint_height_stat):
     for _, values in footprints.items():
-        if "height" not in values["tags"] or values["tags"]["height"] is None:
+        if "height" in values["tags"] and values["tags"]["height"] is not None:
+            continue
+
+        if "building:levels" in values["tags"]:
+            values["tags"]["height"] = int(
+                float(values["tags"]["building:levels"]) * 4.26
+            )
+        else:
             values["tags"]["height"] = _get_missing_footprint_height(
                 values, footprint_height_stat
             )
@@ -362,7 +371,10 @@ def plot_highways(
 def plot_footprints(
     map_name, colormap, map_img, footprints, footprint_nodes, xy_bounds, resolution=None
 ):
-    for _, values in footprints.items():
+    footprints = [v for v in footprints.values()]
+    footprints = sorted(footprints, key=lambda v: v["tags"]["height"])
+
+    for values in footprints:
         way_nodes = []
         for nid in values["nodes"]:
             node = footprint_nodes[nid]

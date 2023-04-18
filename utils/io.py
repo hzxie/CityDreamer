@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2019-08-02 10:22:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-06 14:16:30
+# @Last Modified at: 2023-04-17 10:48:03
 # @Email:  root@haozhexie.com
 
 import io
@@ -18,11 +18,11 @@ from PIL import Image
 # Ref: https://stackoverflow.com/questions/25705773/image-cropping-tool-python
 Image.MAX_IMAGE_PIXELS = None
 
-# References: http://confluence.sensetime.com/pages/viewpage.action?pageId=44650315
-from config import __C as cfg
+from config import cfg
 
 sys.path.append(cfg.MEMCACHED.LIBRARY_PATH)
 
+# References: http://confluence.sensetime.com/pages/viewpage.action?pageId=44650315
 mc_client = None
 if cfg.MEMCACHED.ENABLED:
     import mc

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-13 21:41:12
+# @Last Modified at: 2023-04-18 15:45:23
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -12,6 +12,7 @@ import cv2
 import json
 import logging
 import matplotlib.pyplot as plt
+import math
 import numpy as np
 import os
 import sys
@@ -26,7 +27,7 @@ sys.path.append(PROJECT_HOME)
 import utils.helpers
 import utils.osm_helper
 import extensions.voxlib as voxlib
-from extensions.cu_extrude_tensor import TensorExtruder
+from extensions.extrude_tensor import TensorExtruder
 
 
 def _tag_equals(tags, key, values=None):
@@ -53,9 +54,6 @@ def _get_footprint_color(map_name, footprint_tags):
         if _tag_equals(footprint_tags, "role", ["inner"]):
             # "role" in footprint_tags and footprint_tags["role"] == "inner"
             return None
-        elif _tag_equals(footprint_tags, "building:levels"):
-            # "building:levels" in footprint_tags:
-            return int(float(footprint_tags["building:levels"]) * 4.26)
         elif _tag_equals(footprint_tags, "building", ["roof"]):
             #  "building" in footprint_tags and footprint_tags["building"] == "roof"
             return None
@@ -133,17 +131,8 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     )
 
     # Generate semantic labels
-    # Plot footprint before highway to make highway more smooth
     logging.debug("Generating segmentation maps ...")
     seg_map = utils.osm_helper.get_empty_map(xy_bounds)
-    seg_map = utils.osm_helper.plot_footprints(
-        "seg_map",
-        _get_footprint_color,
-        seg_map,
-        footprints,
-        nodes,
-        xy_bounds,
-    )
     seg_map = utils.osm_helper.plot_highways(
         "seg_map", _get_highway_color, seg_map, highways, nodes, xy_bounds, resolution
     )
@@ -161,6 +150,15 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         seg_map[green_lands != 0] = 3
         coast_zones = get_coast_zones(osm_tile_img_path, seg_map.shape)
         seg_map[coast_zones != 0] = 5
+    # Plot footprint at the end to make building masks more complete
+    seg_map = utils.osm_helper.plot_footprints(
+        "seg_map",
+        _get_footprint_color,
+        seg_map,
+        footprints,
+        nodes,
+        xy_bounds,
+    )
     # Assign ID=6 to unlabelled pixels (regarded as ground)
     seg_map[seg_map == 0] = 6
 
@@ -179,15 +177,7 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
 
     # Generate height fields
     logging.debug("Generating height fields ...")
-    height_field = utils.osm_helper.get_empty_map(xy_bounds)
-    height_field = utils.osm_helper.plot_footprints(
-        "height_field",
-        _get_footprint_color,
-        height_field,
-        footprints,
-        nodes,
-        xy_bounds,
-    )
+    height_field = utils.osm_helper.get_empty_map(xy_bounds, dtype=np.uint16)
     height_field = utils.osm_helper.plot_highways(
         "height_field",
         _get_highway_color,
@@ -202,11 +192,21 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         height_field[coast_zones != 0] = 0
     if green_lands is not None:
         height_field[green_lands != 0] = 8
+    # Follow the order in plotting seg maps
+    height_field = utils.osm_helper.plot_footprints(
+        "height_field",
+        _get_footprint_color,
+        height_field,
+        footprints,
+        nodes,
+        xy_bounds,
+    )
 
-    # Normalize the height values of the image with the same scale as the width and height dimensions
-    assert height_field.all() >= 0 and height_field.all() < 256
-    height_field = (height_field * resolution).astype(np.uint8)
-
+    # The height values should be normalized using the same scale as that of the width and height 
+    # dimensions. However, the following statement results in incorrect outputs. Quite STRANGE!
+    # height_field = (height_field / resolution).astype(np.uint16)
+    print(np.min(height_field), np.max(height_field))
+    height_field = height_field.astype(np.uint16)
     return (
         height_field,
         seg_map,
@@ -276,7 +276,6 @@ def get_google_earth_camera_poses(ge_proj_name, ge_dir):
                 )
                 * 180
                 - 90,
-                # IMPORTANT NOTE: All Google Earth renderings are focused on an altitude of one.
                 "altitude": next(
                     _attr["value"]["relative"]
                     for _attr in camera_target
@@ -287,6 +286,8 @@ def get_google_earth_camera_poses(ge_proj_name, ge_dir):
         },
         "poses": [],
     }
+    # NOTE: All Google Earth renderings are centered around an altitude of 1.
+    assert camera_poses["center"]["coordinate"]["altitude"] == 1
     for cf in camera_settings["cameraFrames"]:
         camera_poses["poses"].append(
             # Note: Rotation is no longer needed now
@@ -294,6 +295,31 @@ def get_google_earth_camera_poses(ge_proj_name, ge_dir):
             {"coordinate": cf["coordinate"]}
         )
     return camera_poses
+
+
+def _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t):
+    mc_rgb = np.array(seg_map.convert("RGB"))
+    # Diffused shading, co-located light.
+    first_intersection_depth = depth2[0, :, :, 0, None, :]
+    first_intersection_point = (
+        raydirs * first_intersection_depth + cam_ori_t[None, None, None, :]
+    )
+    fip_local_coords = torch.remainder(first_intersection_point, 1.0)
+    fip_wall_proximity = torch.minimum(fip_local_coords, 1.0 - fip_local_coords)
+    fip_wall_orientation = torch.argmin(fip_wall_proximity, dim=-1, keepdim=False)
+    # 0: [1,0,0]; 1: [0,1,0]; 2: [0,0,1]
+    lut = torch.tensor(
+        [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        dtype=torch.float32,
+        device=fip_wall_orientation.device,
+    )
+    fip_normal = lut[fip_wall_orientation]
+    diffuse_shade = torch.abs(torch.sum(fip_normal * raydirs, dim=-1))
+
+    mc_rgb = mc_rgb.astype(float) / 255
+    mc_rgb = mc_rgb * diffuse_shade.cpu().numpy()
+    mc_rgb = (mc_rgb ** (1 / 2.2)) * 255
+    return Image.fromarray(mc_rgb.astype(np.uint8))
 
 
 def get_google_earth_aligned_seg_maps(
@@ -322,7 +348,6 @@ def get_google_earth_aligned_seg_maps(
         "x": cx - metadata["bounds"]["xmin"],
         "y": cy - metadata["bounds"]["ymin"],
         "z": ge_camera_poses["center"]["coordinate"]["altitude"]
-        * metadata["resolution"],
     }
     logging.debug(
         "Map Information: Center=%s; Size(HxW): %s"
@@ -334,44 +359,49 @@ def get_google_earth_aligned_seg_maps(
             ),
         )
     )
+    part_seg_map = _get_img_patch(
+        seg_map,
+        ge_camera_poses["center"]["position"]["x"],
+        ge_camera_poses["center"]["position"]["y"],
+        patch_size,
+    )
+    part_hf = _get_img_patch(
+        height_field,
+        ge_camera_poses["center"]["position"]["x"],
+        ge_camera_poses["center"]["position"]["y"],
+        patch_size,
+    )
     seg_volume = tensor_extruder(
-        _get_img_patch_tensor(
-            seg_map,
-            ge_camera_poses["center"]["position"]["x"],
-            ge_camera_poses["center"]["position"]["y"],
-            patch_size,
-        ),
-        _get_img_patch_tensor(
-            height_field,
-            ge_camera_poses["center"]["position"]["x"],
-            ge_camera_poses["center"]["position"]["y"],
-            patch_size,
-        ),
+        torch.from_numpy(part_seg_map[None, None, ...]).cuda(),
+        torch.from_numpy(part_hf[None, None, ...]).cuda(),
     ).squeeze()
     logging.debug("The shape of SegVolume: %s" % (seg_volume.size(),))
     ## Convert camera position to the voxel coordinate system
-    vol_cx, vol_cy, vol_cz = (patch_size - 1) // 2, (patch_size - 1) // 2, 0
+    vol_cx, vol_cy, vol_cz = ((patch_size - 1) // 2, (patch_size - 1) // 2, 0)
 
-    seg_maps = []
-    for gcp in tqdm(ge_camera_poses["poses"], desc="Project: %s" % ge_project_name):
+    # Fix Google Earth STRANGE offset
+    offset = {"x": 0, "y": 0}
+    for gcp in ge_camera_poses["poses"]:
         x, y = utils.osm_helper.lnglat2xy(
             gcp["coordinate"]["longitude"],
             gcp["coordinate"]["latitude"],
             metadata["resolution"],
             zoom_level,
+            dtype=float,
         )
         gcp["position"] = {
-            "x": x
-            - metadata["bounds"]["xmin"]
-            - ge_camera_poses["center"]["position"]["x"]
-            + vol_cx,
-            "y": y
-            - metadata["bounds"]["ymin"]
-            - ge_camera_poses["center"]["position"]["y"]
-            + vol_cy,
-            "z": gcp["coordinate"]["altitude"] * metadata["resolution"]
-            - ge_camera_poses["center"]["position"]["z"],
+            "x": x - cx,
+            "y": y - cy,
+            "z": gcp["coordinate"]["altitude"]
         }
+    offset["x"] = np.mean([gcp["position"]["x"] for gcp in ge_camera_poses["poses"]])
+    offset["y"] = np.mean([gcp["position"]["y"] for gcp in ge_camera_poses["poses"]])
+    logging.debug("XY Coordinates Offset: %s", offset)
+
+    seg_maps = []
+    for gcp in tqdm(ge_camera_poses["poses"], desc="Project: %s" % ge_project_name):
+        gcp["position"]["x"] -= offset["x"] - vol_cx
+        gcp["position"]["y"] -= offset["y"] - vol_cy
         # logging.debug("Camera parameters: %s" % gcp)
         ## Run ray-voxel intersection
         r"""Ray-voxel intersection CUDA kernel.
@@ -394,12 +424,14 @@ def get_google_earth_aligned_seg_maps(
 
         """
         N_MAX_SAMPLES = 6
+        cam_ori_t = torch.tensor(
+            [gcp["position"]["y"], gcp["position"]["x"], gcp["position"]["z"]],
+            dtype=torch.float32,
+            device=seg_volume.device,
+        )
         voxel_id, depth2, raydirs = voxlib.ray_voxel_intersection_perspective(
             seg_volume,
-            torch.tensor(
-                [gcp["position"]["y"], gcp["position"]["x"], gcp["position"]["z"]],
-                dtype=torch.float32,
-            ),
+            cam_ori_t,
             torch.tensor(
                 [
                     vol_cy - gcp["position"]["y"],
@@ -407,9 +439,11 @@ def get_google_earth_aligned_seg_maps(
                     vol_cz - gcp["position"]["z"],
                 ],
                 dtype=torch.float32,
+                device=seg_volume.device,
             ),
             torch.tensor([0, 0, 1], dtype=torch.float32),
-            ge_camera_focal,
+            # MAGIC NUMBER 2 to make it aligned with Google Earth Renderings
+            ge_camera_focal * 2,
             [
                 (ge_camera_poses["height"] - 1) / 2.0,
                 (ge_camera_poses["width"] - 1) / 2.0,
@@ -420,11 +454,12 @@ def get_google_earth_aligned_seg_maps(
         # print(voxel_id.size())    # torch.Size([540, 960, 10, 1])
         seg_map = utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy())
         seg_maps.append(seg_map)
+        # seg_maps.append(_get_diffuse_shading_img(seg_map))
 
     return seg_maps
 
 
-def _get_img_patch_tensor(img, cx, cy, patch_size):
+def _get_img_patch(img, cx, cy, patch_size):
     h, w = img.shape
     x_s, x_e = cx - patch_size // 2, cx + patch_size // 2
     h_s, h_e = cy - patch_size // 2, cy + patch_size // 2
@@ -436,12 +471,7 @@ def _get_img_patch_tensor(img, cx, cy, patch_size):
         h_s = 0 if h_s < 0 else h_s
         h_e = 0 if h_e >= h else h_e
         logging.error("The vertical center is not located at %d as expected" % cy)
-    return (
-        torch.from_numpy(img[h_s:h_e, x_s:x_e].astype(np.int32))
-        .unsqueeze(dim=0)
-        .unsqueeze(dim=0)
-        .cuda()
-    )
+    return img[h_s:h_e, x_s:x_e].astype(np.int32)
 
 
 def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_level):
@@ -465,8 +495,7 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
         utils.helpers.get_seg_map(seg_map).save(os.path.join(_output_dir, "seg.png"))
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")
-        # TODO: Temperorily skip
-        ge_projects = []  # get_google_earth_projects(basename, google_earth_dir)
+        ge_projects = [] # get_google_earth_projects(basename, google_earth_dir)
         if not ge_projects:
             logging.warning(
                 "No matching Google Earth Project found for OSM[File=%s]." % of
@@ -492,22 +521,20 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
 
 
 if __name__ == "__main__":
-    plt.rcParams["figure.figsize"] = (48, 30)
+    plt.rcParams["figure.figsize"] = (20, 20)
     logging.basicConfig(
         filename=os.path.join(PROJECT_HOME, "output", "dataset-generator.log"),
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.DEBUG,
     )
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--osm_dir", default=os.path.join(PROJECT_HOME, "data", "osm", "xml")
-    )
+    parser.add_argument("--osm_dir", default=os.path.join(PROJECT_HOME, "data", "xml"))
     parser.add_argument("--ges_dir", default=os.path.join(PROJECT_HOME, "data", "ges"))
     parser.add_argument(
         "--output_dir", default=os.path.join(PROJECT_HOME, "data", "osm")
     )
-    parser.add_argument("--patch_size", default=1024)
-    parser.add_argument("--max_height", default=256)
+    parser.add_argument("--patch_size", default=1280)
+    parser.add_argument("--max_height", default=650)
     parser.add_argument("--zoom", default=18)
     args = parser.parse_args()
     main(

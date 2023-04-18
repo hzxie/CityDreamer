@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-14 10:04:16
+# @Last Modified at: 2023-04-15 20:24:54
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -97,7 +97,10 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
             import logging
 
             logging.error(hf_file_path)
-        return np.array(utils.io.IO.get(hf_file_path)) / 255.0
+        return (
+            np.array(utils.io.IO.get(hf_file_path))
+            / self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT
+        )
 
     def _get_footprint_contour(self, footprint_ctr_file_path):
         return np.array(utils.io.IO.get(footprint_ctr_file_path).convert("L")) / 255.0
