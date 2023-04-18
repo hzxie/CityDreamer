@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-15 20:24:54
+# @Last Modified at: 2023-04-18 19:17:19
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -42,6 +42,11 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
     def __init__(self, cfg, split):
         super().__init__()
         self.cfg = cfg
+        self.fields = [
+            {"name": "hf", "callback": self._get_height_field},
+            {"name": "ctr", "callback": self._get_footprint_contour},
+            {"name": "seg", "callback": self._get_seg_map},
+        ]
         self.split = split
         self.cities = self._get_cities(cfg, split)
         self.n_cities = len(self.cities)
@@ -56,17 +61,14 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         city = self.cities[idx % self.n_cities]
-        hf, seg = None, None
-        if self.cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY:
-            hf = city["hf"]
-            ctr = city["ctr"]
-            seg = city["seg"]
-        else:
-            hf = self._get_height_field(city["hf"])
-            ctr = self._get_footprint_contour(city["ctr"])
-            seg = self._get_seg_map(city["seg"])
+        data = []
+        for f in self.fields:
+            if f["name"] in self.cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY:
+                data.append(city[f["name"]])
+            else:
+                data.append(f["callback"](city[f["name"]]))
 
-        img = self.transforms(np.stack([hf, ctr, seg], axis=2))
+        img = self.transforms(np.stack(data, axis=2))
         return {"input": img, "output": img}
 
     def _get_cities(self, cfg, split):
@@ -85,9 +87,15 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
 
         return [
             {
-                "hf": self._get_height_field(f["hf"]),
-                "ctr": self._get_footprint_contour(f["ctr"]),
-                "seg": self._get_seg_map(f["seg"]),
+                "hf": self._get_height_field(f["hf"])
+                if "hf" in cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY
+                else f["hf"],
+                "ctr": self._get_footprint_contour(f["ctr"])
+                if "ctr" in cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY
+                else f["ctr"],
+                "seg": self._get_seg_map(f["seg"])
+                if "seg" in cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY
+                else f["seg"],
             }
             for f in tqdm(files, desc="Loading OSMLayout to RAM")
         ]

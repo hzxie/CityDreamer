@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-18 15:54:36
+# @Last Modified at: 2023-04-18 19:20:03
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -18,7 +18,7 @@ cfg                                             = __C
 #
 cfg.DATASETS                                     = EasyDict()
 cfg.DATASETS.OSM_LAYOUT                          = EasyDict()
-cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY               = False
+cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY               = []
 cfg.DATASETS.OSM_LAYOUT.N_REPEAT                 = 250
 cfg.DATASETS.OSM_LAYOUT.DIR                      = "./data/osm"
 cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES          = [0]
