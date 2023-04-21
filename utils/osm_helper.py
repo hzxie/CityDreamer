@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-18 16:31:15
+# @Last Modified at: 2023-04-21 19:52:40
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -73,6 +73,7 @@ def get_highways_and_footprints(osm_file_path):
         osm_file_path,
         [
             "building",
+            "building:part",
             {"k": "landuse", "v": ["construction"]},
         ],
         nodes,
@@ -371,6 +372,9 @@ def plot_highways(
 def plot_footprints(
     map_name, colormap, map_img, footprints, footprint_nodes, xy_bounds, resolution=None
 ):
+    # For debug
+    # for k, v in footprints.items():
+    #     v["tags"]["id"] = k
     footprints = [v for v in footprints.values()]
     footprints = sorted(footprints, key=lambda v: v["tags"]["height"])
 
