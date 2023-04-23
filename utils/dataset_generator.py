@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-21 20:28:45
+# @Last Modified at: 2023-04-23 13:46:57
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -19,6 +19,10 @@ import torch
 
 from tqdm import tqdm
 from PIL import Image
+
+# Disable the warning message for PIL decompression bomb
+# Ref: https://stackoverflow.com/questions/25705773/image-cropping-tool-python
+Image.MAX_IMAGE_PIXELS = None
 
 PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
 sys.path.append(PROJECT_HOME)
@@ -290,7 +294,10 @@ def _get_google_earth_camera_poses(ge_proj_name, ge_dir):
         "poses": [],
     }
     # NOTE: All Google Earth renderings are centered around an altitude of 1.
-    assert camera_poses["center"]["coordinate"]["altitude"] == 1
+    if camera_poses["center"]["coordinate"]["altitude"] != 1:
+        logging.warning("The altitude of the camera center is not 1.")
+        return None
+
     for cf in camera_settings["cameraFrames"]:
         camera_poses["poses"].append(
             # Note: Rotation is no longer needed now
@@ -366,7 +373,12 @@ def get_google_earth_aligned_seg_maps(
     zoom_level,
     tensor_extruder,
 ):
+    logging.info("Parsing Google Earth Project: %s" % ge_project_name)
     ge_camera_poses = _get_google_earth_camera_poses(ge_project_name, google_earth_dir)
+    if ge_camera_poses is None:
+        return []
+
+    assert ge_camera_poses is not None
     ge_camera_focal = (
         ge_camera_poses["height"] / 2 / np.tan(np.deg2rad(ge_camera_poses["vfov"]))
     )
@@ -491,7 +503,7 @@ def get_google_earth_aligned_seg_maps(
             N_MAX_SAMPLES,
         )
         # print(voxel_id.size())    # torch.Size([540, 960, 10, 1])
-        seg_map = utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy())
+        # seg_map = utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy())
         # seg_maps.append(_get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t))
         seg_maps.append(
             {
@@ -514,14 +526,33 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
         _output_dir = os.path.join(output_dir, basename)
         os.makedirs(_output_dir, exist_ok=True)
         # Rasterisation
-        height_field, seg_map, contours, metadata = get_osm_images(
-            os.path.join(osm_dir, of),
-            os.path.join(_output_dir, "tiles.png"),
-            zoom_level,
-        )
-        Image.fromarray(height_field).save(os.path.join(_output_dir, "hf.png"))
-        Image.fromarray(contours).save(os.path.join(_output_dir, "ctr.png"))
-        utils.helpers.get_seg_map(seg_map).save(os.path.join(_output_dir, "seg.png"))
+        output_hf_file_path = os.path.join(_output_dir, "hf.png")
+        output_ctr_file_path = os.path.join(_output_dir, "ctr.png")
+        output_seg_map_file_path = os.path.join(_output_dir, "seg.png")
+        metadata_file_path = os.path.join(_output_dir, "metadata.json")
+        if (
+            os.path.exists(output_hf_file_path)
+            and os.path.exists(output_ctr_file_path)
+            and os.path.exists(output_seg_map_file_path)
+            and os.path.exists(metadata_file_path)
+        ):
+            height_field = np.array(Image.open(output_hf_file_path))
+            contours = np.array(Image.open(output_ctr_file_path).convert("L"))
+            seg_map = np.array(Image.open(output_seg_map_file_path).convert("P"))
+            with open(metadata_file_path) as f:
+                metadata = json.load(f)
+        else:
+            height_field, seg_map, contours, metadata = get_osm_images(
+                os.path.join(osm_dir, of),
+                os.path.join(_output_dir, "tiles.png"),
+                zoom_level,
+            )
+            Image.fromarray(height_field).save(output_hf_file_path)
+            Image.fromarray(contours).save(output_ctr_file_path)
+            utils.helpers.get_seg_map(seg_map).save(output_seg_map_file_path)
+            with open(metadata_file_path, "w") as f:
+                json.dump(metadata, f)
+
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")
         ge_projects = get_google_earth_projects(basename, google_earth_dir)
@@ -532,6 +563,8 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
             continue
         # Read Google Earth Studio metadata
         for gep in ge_projects:
+            ges_seg_dir = os.path.join(google_earth_dir, gep, "raycasting")
+            os.makedirs(ges_seg_dir, exist_ok=True)
             seg_maps = get_google_earth_aligned_seg_maps(
                 gep,
                 google_earth_dir,
@@ -544,10 +577,11 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
                 tensor_extruder,
             )
             # Generate the corresponding voxel raycasting maps
-            ges_seg_dir = os.path.join(google_earth_dir, gep, "raycasting")
-            os.makedirs(ges_seg_dir, exist_ok=True)
             for idx, sg in enumerate(seg_maps):
-                np.save(os.path.join(ges_seg_dir, "%s-%04d.npy" % (gep, idx)), sg)
+                # sg.save(os.path.join(ges_seg_dir, "%s-%04d.jpg" % (gep, idx)))
+                np.save(
+                    os.path.join(ges_seg_dir, "%s-%04d.npy" % (gep, idx)), sg
+                )
 
 
 if __name__ == "__main__":
