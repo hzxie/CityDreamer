@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-23 13:46:57
+# @Last Modified at: 2023-04-27 14:25:29
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -231,7 +231,7 @@ def get_google_earth_projects(osm_basename, google_earth_dir):
         if gp.startswith("%s-%s" % (osm_country, osm_city)):
             projects.append(gp)
 
-    return projects
+    return sorted(projects)
 
 
 def _get_google_earth_camera_poses(ge_proj_name, ge_dir):
@@ -389,7 +389,9 @@ def get_google_earth_aligned_seg_maps(
         ge_camera_poses["center"]["coordinate"]["latitude"],
         metadata["resolution"],
         zoom_level,
+        dtype=float,
     )
+    cx, cy = int(cx + 0.5), int(cy + 0.5)
     ge_camera_poses["center"]["position"] = {
         "x": cx - metadata["bounds"]["xmin"],
         "y": cy - metadata["bounds"]["ymin"],
@@ -578,9 +580,9 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
             )
             # Generate the corresponding voxel raycasting maps
             for idx, sg in enumerate(seg_maps):
-                # sg.save(os.path.join(ges_seg_dir, "%s-%04d.jpg" % (gep, idx)))
+                # sg.save(os.path.join(ges_seg_dir, "%s-%02d.jpg" % (gep, idx)))
                 np.save(
-                    os.path.join(ges_seg_dir, "%s-%04d.npy" % (gep, idx)), sg
+                    os.path.join(ges_seg_dir, "%s-%02d.npy" % (gep, idx)), sg
                 )
 
 
