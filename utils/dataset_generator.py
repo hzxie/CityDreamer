@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-27 14:25:29
+# @Last Modified at: 2023-04-27 20:44:43
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -14,6 +14,7 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import pickle
 import sys
 import torch
 
@@ -513,6 +514,7 @@ def get_google_earth_aligned_seg_maps(
                 "depth2": depth2.cpu().numpy(),
                 "raydirs": raydirs.cpu().numpy(),
                 "cam_ori_t": cam_ori_t.cpu().numpy(),
+                "img_patch_center": {"cx": cx, "cy": cy},
             }
         )
 
@@ -581,9 +583,10 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
             # Generate the corresponding voxel raycasting maps
             for idx, sg in enumerate(seg_maps):
                 # sg.save(os.path.join(ges_seg_dir, "%s-%02d.jpg" % (gep, idx)))
-                np.save(
-                    os.path.join(ges_seg_dir, "%s-%02d.npy" % (gep, idx)), sg
-                )
+                with open(
+                    os.path.join(ges_seg_dir, "%s-%02d.pkl" % (gep, idx)), "wb"
+                ) as f:
+                    pickle.dump(sg, f)
 
 
 if __name__ == "__main__":
