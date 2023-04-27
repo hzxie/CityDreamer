@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-13 21:53:28
+# @Last Modified at: 2023-04-27 17:23:09
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -22,33 +22,39 @@ class Compose(object):
             parameters = tr["parameters"] if "parameters" in tr else None
             self.transformers.append(
                 {
-                    "callback": transformer(parameters),
+                    "callback": transformer(parameters, tr["objects"]),
                 }
             )
 
-    def __call__(self, img):
+    def __call__(self, data):
         for tr in self.transformers:
             transform = tr["callback"]
-            img = transform(img)
+            data = transform(data)
 
-        return img
+        return data
 
 
 class ToTensor(object):
-    def __init__(self, _):
-        pass
+    def __init__(self, _, objects):
+        self.objects = objects
 
-    def __call__(self, img):
-        if type(img) == list:
-            return torch.from_numpy(np.array(img)).float().permute(0, 3, 1, 2)
-        else:
-            return torch.from_numpy(img).permute(2, 0, 1).float()
+    def __call__(self, data):
+        for k, v in data.items():
+            if k in self.objects:
+                # H, W -> H, W, C
+                if len(v.shape) == 2:
+                    v = v[..., None]
+
+                data[k] = torch.from_numpy(v).permute(2, 0, 1).float()
+
+        return data
 
 
 class RandomFlip(object):
-    def __init__(self, parameters):
+    def __init__(self, parameters, objects):
         self.hflip = parameters["hflip"] if parameters else True
         self.vflip = parameters["vflip"] if parameters else True
+        self.objects = objects
 
     def _random_flip(self, img, hflip, vflip):
         if hflip:
@@ -58,72 +64,92 @@ class RandomFlip(object):
 
         return img.copy()
 
-    def __call__(self, img):
+    def __call__(self, data):
         hflip = True if random.random() <= 0.5 and self.hflip else False
         vflip = True if random.random() <= 0.5 and self.vflip else False
-        if type(img) == list:
-            return [self._random_flip(i, hflip, vflip) for i in img]
-        else:
-            return self._random_flip(img, hflip, vflip)
+        for k, v in data.items():
+            if k in self.objects:
+                data[k] = self._random_flip(v, hflip, vflip)
+
+        return data
 
 
 class CenterCrop(object):
-    def __init__(self, parameters):
+    def __init__(self, parameters, objects):
         self.height = parameters["height"]
         self.width = parameters["width"]
+        self.objects = objects
 
     def _center_crop(self, img):
-        h, w, _ = img.shape
+        if len(img.shape) == 2:
+            h, w = img.shape
+        elif len(img.shape) == 3:
+            h, w, _ = img.shape
+        else:
+            raise Exception("Unknown image shape: %s" % (img.shape,))
+
         offset_x = w // 2 - self.width // 2
         offset_y = h // 2 - self.height // 2
         new_img = img[
-            offset_y : offset_y + self.height, offset_x : offset_x + self.width, :
+            offset_y : offset_y + self.height, offset_x : offset_x + self.width
         ]
         return new_img
 
-    def __call__(self, img):
-        if type(img) == list:
-            return [self._center_crop(i) for i in img]
-        else:
-            return self._center_crop(img)
+    def __call__(self, data):
+        for k, v in data.items():
+            if k in self.objects:
+                data[k] = self._center_crop(v)
+
+        return data
 
 
 class RandomCrop(object):
-    def __init__(self, parameters):
+    def __init__(self, parameters, objects):
         self.height = parameters["height"]
         self.width = parameters["width"]
+        self.objects = objects
 
-    def _random_crop(self, img):
-        h, w, _ = img.shape
+    def _random_crop(self, img, offset_x, offset_y):
         new_img = None
-        offset_x = random.randint(0, w - self.width)
-        offset_y = random.randint(0, h - self.height)
         new_img = img[
-            offset_y : offset_y + self.height, offset_x : offset_x + self.width, :
+            offset_y : offset_y + self.height, offset_x : offset_x + self.width
         ]
         return new_img
 
-    def __call__(self, img):
-        if type(img) == list:
-            return [self._random_crop(i) for i in img]
+    def __call__(self, data):
+        img = data[self.objects[0]]
+        if len(img.shape) == 2:
+            h, w = img.shape
+        elif len(img.shape) == 3:
+            h, w, _ = img.shape
         else:
-            return self._random_crop(img)
+            raise Exception("Unknown image shape: %s" % (img.shape,))
+
+        offset_x = random.randint(0, w - self.width)
+        offset_y = random.randint(0, h - self.height)
+
+        for k, v in data.items():
+            if k in self.objects:
+                data[k] = self._random_crop(v, offset_x, offset_y)
+
+        return data
 
 
 class ToOneHot(object):
-    def __init__(self, parameters):
+    def __init__(self, parameters, objects):
         self.n_classes = parameters["n_classes"]
         self.ignored_classes = parameters["ignored_classes"]
+        self.objects = objects
 
     def _to_onehot(self, img):
-        assert img.shape[2] == 3
         mask = utils.helpers.mask_to_onehot(
-            img[..., 2], self.n_classes, self.ignored_classes
+            img, self.n_classes, self.ignored_classes
         )
-        return np.concatenate([img[..., :2], mask], axis=2)
+        return mask
 
-    def __call__(self, img):
-        if type(img) == list:
-            return [self._to_onehot(i) for i in img]
-        else:
-            return self._to_onehot(img)
+    def __call__(self, data):
+        for k, v in data.items():
+            if k in self.objects:
+                data[k] = self._to_onehot(v)
+
+        return data

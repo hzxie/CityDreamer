@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-18 19:17:19
+# @Last Modified at: 2023-04-27 17:26:27
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -61,14 +61,16 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         city = self.cities[idx % self.n_cities]
-        data = []
+        data = {}
         for f in self.fields:
-            if f["name"] in self.cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY:
-                data.append(city[f["name"]])
+            fn = f["name"]
+            if fn in self.cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY:
+                data[fn] = city[fn]
             else:
-                data.append(f["callback"](city[f["name"]]))
+                data[fn] = f["callback"](city[fn])
 
-        img = self.transforms(np.stack(data, axis=2))
+        img = self.transforms(data)
+        img = torch.cat([data[f["name"]] for f in self.fields], dim=0)
         return {"input": img, "output": img}
 
     def _get_cities(self, cfg, split):
@@ -126,16 +128,26 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                             "height": cfg.NETWORK.VQGAN.RESOLUTION,
                             "width": cfg.NETWORK.VQGAN.RESOLUTION,
                         },
+                        "objects": ["hf", "ctr", "seg"],
                     },
-                    {"callback": "RandomFlip", "parameters": None},
+                    {
+                        "callback": "RandomFlip",
+                        "parameters": None,
+                        "objects": ["hf", "ctr", "seg"],
+                    },
                     {
                         "callback": "ToOneHot",
                         "parameters": {
                             "n_classes": cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
                             "ignored_classes": cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
                         },
+                        "objects": ["seg"],
                     },
-                    {"callback": "ToTensor", "parameters": None},
+                    {
+                        "callback": "ToTensor",
+                        "parameters": None,
+                        "objects": ["hf", "ctr", "seg"],
+                    },
                 ]
             )
         else:
@@ -147,6 +159,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                             "height": cfg.NETWORK.VQGAN.RESOLUTION,
                             "width": cfg.NETWORK.VQGAN.RESOLUTION,
                         },
+                        "objects": ["hf", "ctr", "seg"],
                     },
                     {
                         "callback": "ToOneHot",
@@ -154,7 +167,12 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                             "n_classes": cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
                             "ignored_classes": cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
                         },
+                        "objects": ["seg"],
                     },
-                    {"callback": "ToTensor", "parameters": None},
+                    {
+                        "callback": "ToTensor",
+                        "parameters": None,
+                        "objects": ["hf", "ctr", "seg"],
+                    },
                 ]
             )
