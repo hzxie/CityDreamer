@@ -4,12 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2019-08-02 10:22:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-17 10:48:03
+# @Last Modified at: 2023-04-27 20:23:54
 # @Email:  root@haozhexie.com
 
 import io
 import numpy as np
 import os
+import pickle
 import sys
 
 from PIL import Image
@@ -39,8 +40,10 @@ class IO:
             return None
 
         _, file_extension = os.path.splitext(file_path)
-        if file_extension in [".png", ".jpg"]:
+        if file_extension in [".png", ".jpg", ".jpeg"]:
             return cls._read_img(file_path)
+        if file_extension in [".pkl"]:
+            return cls._read_pkl(file_path)
         else:
             raise Exception("Unsupported file extension: %s" % file_extension)
 
@@ -55,3 +58,16 @@ class IO:
             img = Image.open(io.BytesIO(np.frombuffer(buf, np.uint8)))
 
         return img
+
+    @classmethod
+    def _read_pkl(cls, file_path):
+        if mc_client is None:
+            with open(file_path, "rb") as f:
+                pkl = pickle.load(f)
+        else:
+            pyvector = mc.pyvector()
+            mc_client.Get(file_path, pyvector)
+            buf = mc.ConvertBuffer(pyvector)
+            pkl = pickle.loads(buf)
+
+        return pkl

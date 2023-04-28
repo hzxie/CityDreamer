@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2020-04-19 12:52:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-09 15:59:26
+# @Last Modified at: 2023-04-28 16:09:20
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -48,18 +48,24 @@ class SummaryWriter(object):
             self.writer.log(scalars)
 
     def _get_tb_image(self, image):
+        # Related to: utils.helpers.tensor_to_image
         if type(image) == PIL.Image.Image:
             return np.array(image.convert("RGB"))
-        elif len(image.shape) == 2:
+        elif type(image) == np.ndarray and len(image.shape) == 2:
+            return image
+        elif type(image) == np.ndarray and len(image.shape) == 3:
             return image
         else:
             raise Exception("Unknown image format")
 
     def _get_tb_image_format(self, image):
+        # Related to: utils.helpers.tensor_to_image
         if type(image) == PIL.Image.Image:
             return "HWC"
-        elif len(image.shape) == 2:
+        elif type(image) == np.ndarray and len(image.shape) == 2:
             return "HW"
+        elif type(image) == np.ndarray and len(image.shape) == 3:
+            return "HWC"
         else:
             raise Exception("Unknown image format")
 

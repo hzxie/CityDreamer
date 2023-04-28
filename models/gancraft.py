@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-15 15:44:21
+# @Last Modified at: 2023-04-28 15:14:59
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -27,25 +27,24 @@ class GanCraftGenerator(torch.nn.Module):
             lvl_channels=cfg.NETWORK.GANCRAFT.GRID_LEVEL_DIM,
             desired_resolution=cfg.NETWORK.VQGAN.RESOLUTION,
         )
-        self.sky_net = SkyMLP(cfg)
         self.render_net = RenderMLP(cfg)
         self.denoiser = RenderCNN(cfg)
 
-    def forward(self, images, voxel_id, depth2, raydirs, cam_ori_t):
+    def forward(self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t):
         r"""GANcraft Generator forward.
 
         Args:
-            images (N x (1 + M) x H' x W' tensor) : height field + seg map, where M is the number of classes.
+            hf_seg (N x (1 + M) x H' x W' tensor) : height field + seg map, where M is the number of classes.
             voxel_id (N x H x W x max_samples x 1 tensor): IDs of intersected tensors along each ray.
-            depth2 (N x 2 x H x W x max_samples x 1 tensor): Depths of entrance and exit points for each ray-voxel
+            depth2 (N x H x W x 2 x max_samples x 1 tensor): Depths of entrance and exit points for each ray-voxel
             intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
             cam_ori_t (N x 3 tensor): Camera origins.
         Returns:
             fake_images (N x 3 x H x W tensor): fake images
         """
-        bs, device = images.size(0), images.device
-        global_features = self.cond_hash_grid(images)
+        bs, device = hf_seg.size(0), hf_seg.device
+        global_features = self.cond_hash_grid(hf_seg)
         z = torch.randn(
             bs,
             self.cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
@@ -64,15 +63,13 @@ class GanCraftGenerator(torch.nn.Module):
         Args:
             global_features (N x C1 tensor): Global block features determined by the current scene.
             voxel_id (N x H x W x M x 1 tensor): Voxel ids from ray-voxel intersection test. M: num intersected voxels
-            depth2 (N x 2 x H x W x M x 1 tensor): Depths of entrance and exit points for each ray-voxel intersection.
+            depth2 (N x H x W x 2 x M x 1 tensor): Depths of entrance and exit points for each ray-voxel intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
             cam_ori_t (N x 3 tensor): Camera origins.
             z (N x C3 tensor): Intermediate style vectors.
         """
         # Generate sky_mask; PE transform on ray direction.
         with torch.no_grad():
-            # sky_mask: when True, ray finally hits sky
-            sky_mask = voxel_id[:, :, :, [-1], :] == 0
             # sky_only_mask: when True, ray hits nothing but sky
             sky_only_mask = voxel_id[:, :, :, [0], :] == 0
 
@@ -109,42 +106,16 @@ class GanCraftGenerator(torch.nn.Module):
         net_out_s, net_out_c = self._forward_perpix_sub(
             global_features, worldcoord2, z, mc_masks_onehot
         )
-        # Handle sky
-        sky_raydirs_in = raydirs.expand(-1, -1, -1, 1, -1).contiguous()
-        sky_raydirs_in = extensions.voxlib.positional_encoding(
-            sky_raydirs_in,
-            self.cfg.NETWORK.GANCRAFT.SKY_POS_EMD_DEG,
-            -1,
-            self.cfg.NETWORK.GANCRAFT.SKY_INC_ORIG_RAYDIR,
-        )
-        skynet_out_c = self.sky_net(sky_raydirs_in, z)
 
         # Blending
         weights = self._volum_rendering_relu(
             net_out_s, new_dists * self.cfg.NETWORK.GANCRAFT.DIST_SCALE, dim=-2
         )
-
         # If a ray exclusively hits the sky (no intersection with the voxels), set its weight to zero.
         weights = weights * torch.logical_not(sky_only_mask).float()
-        total_weights_raw = torch.sum(weights, dim=-2, keepdim=True)  # 256 256 1 1
-        total_weights = total_weights_raw
-
-        is_gnd = worldcoord2[..., [0]] <= 1.0
-        is_gnd = is_gnd.any(dim=-2, keepdim=True)
-        nosky_mask = torch.logical_or(torch.logical_not(sky_mask), is_gnd)
-        nosky_mask = nosky_mask.float()
-
-        # Avoid sky leakage
-        sky_weight = 1.0 - total_weights
-        # keep_sky_out_avgpool overrides sky_replace_color
-        sky_avg = torch.mean(skynet_out_c, dim=[1, 2], keepdim=True)
-        skynet_out_c = skynet_out_c * (1.0 - nosky_mask) + sky_avg * (nosky_mask)
 
         rgbs = torch.clamp(net_out_c, -1, 1) + 1
-        rgbs_sky = torch.clamp(skynet_out_c, -1, 1) + 1
-        net_out = (
-            torch.sum(weights * rgbs, dim=-2, keepdim=True) + sky_weight * rgbs_sky
-        )
+        net_out = torch.sum(weights * rgbs, dim=-2, keepdim=True)
         net_out = net_out.squeeze(-2)
         net_out = net_out - 1
         return net_out
@@ -161,10 +132,10 @@ class GanCraftGenerator(torch.nn.Module):
         Exception: When there is not enough voxel.
 
         Args:
-            depth2 (N x 2 x H x W x M x 1 tensor):
+            depth2 (N x H x W x 2 x M x 1 tensor):
             - N: Batch.
-            - 2: Entrance / exit depth for each intersected box.
             - H, W: Height, Width.
+            - 2: Entrance / exit depth for each intersected box.
             - M: Number of intersected boxes along the ray.
             - 1: One extra dim for consistent tensor dims.
             depth2 can include NaNs.
@@ -174,9 +145,9 @@ class GanCraftGenerator(torch.nn.Module):
         """
 
         bs = depth2.size(0)
-        dim0 = depth2.size(2)
-        dim1 = depth2.size(3)
-        dists = depth2[:, 1] - depth2[:, 0]
+        dim0 = depth2.size(1)
+        dim1 = depth2.size(2)
+        dists = depth2[:, :, :, 1] - depth2[:, :, :, 0]
         dists[torch.isnan(dists)] = 0
         # print(dists.size())  # torch.Size([N, H, W, M, 1])
         accu_depth = torch.cumsum(dists, dim=-2)
@@ -237,12 +208,12 @@ class GanCraftGenerator(torch.nn.Module):
         # print(idx.shape, idx.max(), idx.min()) # torch.Size([N, H, W, n_samples, 1]) max 5, min 0
 
         depth_deltas = (
-            depth2[:, 0, :, :, 1:, :] - depth2[:, 1, :, :, :-1, :]
+            depth2[:, :, :, 0, 1:, :] - depth2[:, :, :, 1, :-1, :]
         )  # There might be NaNs!
         # print(depth_deltas.size())  # torch.Size([N, H, W, M, M - 1, 1])
         depth_deltas = torch.cumsum(depth_deltas, dim=-2)
         depth_deltas = torch.cat(
-            [depth2[:, 0, :, :, [0], :], depth_deltas + depth2[:, 0, :, :, [0], :]],
+            [depth2[:, :, :, 0, [0], :], depth_deltas + depth2[:, :, :, 0, [0], :]],
             dim=-2,
         )
         heads = torch.gather(depth_deltas, -2, idx)
@@ -342,10 +313,9 @@ class ConditionalHashGrid(torch.nn.Module):
         self.fc2 = torch.nn.Linear(16, 2)
         self.act = torch.nn.LeakyReLU(0.2)
 
-    def forward(self, images):
-        # Skip the 2nd channel for footprint boundaries
-        hf = self.act(self.hf_conv(images[:, [0]]))
-        seg = self.act(self.seg_conv(images[:, 2:]))
+    def forward(self, hf_seg):
+        hf = self.act(self.hf_conv(hf_seg[:, [0]]))
+        seg = self.act(self.seg_conv(hf_seg[:, 1:]))
         joint = torch.cat([hf, seg], dim=1)
         for layer in self.conv_blocks:
             out = self.act(layer(joint))
@@ -448,66 +418,6 @@ class RenderMLP(torch.nn.Module):
         f = self.act(self.fc_6(f, z))
         c = self.fc_out_c(f)
         return sigma, c
-
-
-class SkyMLP(torch.nn.Module):
-    r"""MLP converting ray directions to sky features."""
-
-    def __init__(self, cfg):
-        super(SkyMLP, self).__init__()
-        self.fc_z_a = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            bias=False,
-        )
-        self.fc1 = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.SKY_IN_CHANNEL_BASE
-            * cfg.NETWORK.GANCRAFT.SKY_POS_EMD_DEG
-            * 2
-            + cfg.NETWORK.GANCRAFT.SKY_IN_CHANNEL_BASE,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
-        self.fc2 = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
-        self.fc3 = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
-        self.fc4 = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
-        self.fc5 = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
-        self.fc_out_c = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR,
-        )
-        self.act = torch.nn.LeakyReLU(negative_slope=0.2, inplace=True)
-
-    def forward(self, x, z):
-        r"""Forward network
-
-        Args:
-            x (... x in_channels tensor): Ray direction embeddings.
-            z (... x cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM tensor): Style codes.
-        """
-        z = self.fc_z_a(z)
-        while z.dim() < x.dim():
-            z = z.unsqueeze(1)
-
-        y = self.act(self.fc1(x) + z)
-        y = self.act(self.fc2(y))
-        y = self.act(self.fc3(y))
-        y = self.act(self.fc4(y))
-        y = self.act(self.fc5(y))
-        c = self.fc_out_c(y)
-
-        return c
 
 
 class RenderCNN(torch.nn.Module):

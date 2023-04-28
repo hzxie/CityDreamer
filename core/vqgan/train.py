@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-14 10:42:56
+# @Last Modified at: 2023-04-28 15:01:07
 # @Email:  root@haozhexie.com
 
 import logging
@@ -116,12 +116,12 @@ def train(cfg):
             train_sampler.set_epoch(epoch_idx)
 
         batch_end_time = time()
-        for batch_idx, data in enumerate(train_data_loader):
+        for batch_idx, img in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
             data_time.update(time() - batch_end_time)
 
-            input = utils.helpers.var_or_cuda(data["input"], vqae.device)
-            output = utils.helpers.var_or_cuda(data["output"], vqae.device)
+            input = utils.helpers.var_or_cuda(img, vqae.device)
+            output = utils.helpers.var_or_cuda(img, vqae.device)
             pred, quant_loss = vqae(input)
             rec_loss = l1_loss(pred[:, 0], output[:, 0])
             ctr_loss = bce_loss(torch.sigmoid(pred[:, 1]), output[:, 1])
@@ -150,11 +150,11 @@ def train(cfg):
             if local_rank == 0:
                 tb_writer.add_scalars(
                     {
-                        "Loss/Batch/Rec": losses.val(0),
-                        "Loss/Batch/Ctr": losses.val(1),
-                        "Loss/Batch/Seg": losses.val(2),
-                        "Loss/Batch/Quant": losses.val(3),
-                        "Loss/Batch/Total": losses.val(4),
+                        "VQGAN/Loss/Batch/Rec": losses.val(0),
+                        "VQGAN/Loss/Batch/Ctr": losses.val(1),
+                        "VQGAN/Loss/Batch/Seg": losses.val(2),
+                        "VQGAN/Loss/Batch/Quant": losses.val(3),
+                        "VQGAN/Loss/Batch/Total": losses.val(4),
                     },
                     n_itr,
                 )
@@ -175,11 +175,11 @@ def train(cfg):
         if local_rank == 0:
             tb_writer.add_scalars(
                 {
-                    "Loss/Epoch/Rec/Train": losses.avg(0),
-                    "Loss/Epoch/Ctr/Train": losses.avg(1),
-                    "Loss/Epoch/Seg/Train": losses.avg(2),
-                    "Loss/Epoch/Quant/Train": losses.avg(3),
-                    "Loss/Epoch/Total/Train": losses.avg(4),
+                    "VQGAN/Loss/Epoch/Rec/Train": losses.avg(0),
+                    "VQGAN/Loss/Epoch/Ctr/Train": losses.avg(1),
+                    "VQGAN/Loss/Epoch/Seg/Train": losses.avg(2),
+                    "VQGAN/Loss/Epoch/Quant/Train": losses.avg(3),
+                    "VQGAN/Loss/Epoch/Total/Train": losses.avg(4),
                 },
                 epoch_idx,
             )
@@ -198,11 +198,11 @@ def train(cfg):
         if local_rank == 0:
             tb_writer.add_scalars(
                 {
-                    "Loss/Epoch/Rec/Test": losses.avg(0),
-                    "Loss/Epoch/Ctr/Test": losses.avg(1),
-                    "Loss/Epoch/Seg/Test": losses.avg(2),
-                    "Loss/Epoch/Quant/Test": losses.avg(3),
-                    "Loss/Epoch/Total/Test": losses.avg(4),
+                    "VQGAN/Loss/Epoch/Rec/Test": losses.avg(0),
+                    "VQGAN/Loss/Epoch/Ctr/Test": losses.avg(1),
+                    "VQGAN/Loss/Epoch/Seg/Test": losses.avg(2),
+                    "VQGAN/Loss/Epoch/Quant/Test": losses.avg(3),
+                    "VQGAN/Loss/Epoch/Total/Test": losses.avg(4),
                 },
                 epoch_idx,
             )

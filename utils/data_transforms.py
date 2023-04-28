@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-27 17:23:09
+# @Last Modified at: 2023-04-28 15:20:00
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -41,11 +41,14 @@ class ToTensor(object):
     def __call__(self, data):
         for k, v in data.items():
             if k in self.objects:
-                # H, W -> H, W, C
                 if len(v.shape) == 2:
+                    # H, W -> H, W, C
                     v = v[..., None]
+                if len(v.shape) == 3:
+                    # H, W, C -> C, H, W
+                    v = v.transpose((2, 0, 1))
 
-                data[k] = torch.from_numpy(v).permute(2, 0, 1).float()
+                data[k] = torch.from_numpy(v).float()
 
         return data
 
@@ -81,13 +84,7 @@ class CenterCrop(object):
         self.objects = objects
 
     def _center_crop(self, img):
-        if len(img.shape) == 2:
-            h, w = img.shape
-        elif len(img.shape) == 3:
-            h, w, _ = img.shape
-        else:
-            raise Exception("Unknown image shape: %s" % (img.shape,))
-
+        h, w = img.shape[0], img.shape[1]
         offset_x = w // 2 - self.width // 2
         offset_y = h // 2 - self.height // 2
         new_img = img[
@@ -118,13 +115,7 @@ class RandomCrop(object):
 
     def __call__(self, data):
         img = data[self.objects[0]]
-        if len(img.shape) == 2:
-            h, w = img.shape
-        elif len(img.shape) == 3:
-            h, w, _ = img.shape
-        else:
-            raise Exception("Unknown image shape: %s" % (img.shape,))
-
+        h, w = img.shape[0], img.shape[1]
         offset_x = random.randint(0, w - self.width)
         offset_y = random.randint(0, h - self.height)
 
@@ -138,13 +129,13 @@ class RandomCrop(object):
 class ToOneHot(object):
     def __init__(self, parameters, objects):
         self.n_classes = parameters["n_classes"]
-        self.ignored_classes = parameters["ignored_classes"]
+        self.ignored_classes = (
+            parameters["ignored_classes"] if "ignored_classes" in parameters else []
+        )
         self.objects = objects
 
     def _to_onehot(self, img):
-        mask = utils.helpers.mask_to_onehot(
-            img, self.n_classes, self.ignored_classes
-        )
+        mask = utils.helpers.mask_to_onehot(img, self.n_classes, self.ignored_classes)
         return mask
 
     def __call__(self, data):

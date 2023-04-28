@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-27 20:44:43
+# @Last Modified at: 2023-04-28 14:11:30
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -511,10 +511,13 @@ def get_google_earth_aligned_seg_maps(
         seg_maps.append(
             {
                 "voxel_id": voxel_id.cpu().numpy(),
-                "depth2": depth2.cpu().numpy(),
+                "depth2": depth2.permute(1, 2, 0, 3, 4).cpu().numpy(),
                 "raydirs": raydirs.cpu().numpy(),
                 "cam_ori_t": cam_ori_t.cpu().numpy(),
-                "img_patch_center": {"cx": cx, "cy": cy},
+                "img_center": {
+                    "cx": ge_camera_poses["center"]["position"]["x"],
+                    "cy": ge_camera_poses["center"]["position"]["y"],
+                },
             }
         )
 
@@ -584,7 +587,7 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
             for idx, sg in enumerate(seg_maps):
                 # sg.save(os.path.join(ges_seg_dir, "%s-%02d.jpg" % (gep, idx)))
                 with open(
-                    os.path.join(ges_seg_dir, "%s-%02d.pkl" % (gep, idx)), "wb"
+                    os.path.join(ges_seg_dir, "%s_%02d.pkl" % (gep, idx)), "wb"
                 ) as f:
                     pickle.dump(sg, f)
 

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-27 17:26:27
+# @Last Modified at: 2023-04-28 15:32:51
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -20,6 +20,8 @@ from tqdm import tqdm
 def get_dataset(cfg, dataset_name, split):
     if dataset_name == "OSM_LAYOUT":
         return OsmLayoutDataset(cfg, split)
+    elif dataset_name == "GOOGLE_EARTH":
+        return GoogleEarthDataset(cfg, split)
     else:
         raise Exception("Unknown dataset: %s" % dataset_name)
 
@@ -43,9 +45,9 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
         super().__init__()
         self.cfg = cfg
         self.fields = [
-            {"name": "hf", "callback": self._get_height_field},
-            {"name": "ctr", "callback": self._get_footprint_contour},
-            {"name": "seg", "callback": self._get_seg_map},
+            {"name": "hf", "callback": self.get_height_field},
+            {"name": "ctr", "callback": self.get_footprint_contour},
+            {"name": "seg", "callback": self.get_seg_map},
         ]
         self.split = split
         self.cities = self._get_cities(cfg, split)
@@ -67,11 +69,11 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
             if fn in self.cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY:
                 data[fn] = city[fn]
             else:
-                data[fn] = f["callback"](city[fn])
+                data[fn] = f["callback"](city[fn], self.cfg)
 
         img = self.transforms(data)
         img = torch.cat([data[f["name"]] for f in self.fields], dim=0)
-        return {"input": img, "output": img}
+        return img
 
     def _get_cities(self, cfg, split):
         cities = sorted(os.listdir(cfg.DATASETS.OSM_LAYOUT.DIR))
@@ -89,33 +91,26 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
 
         return [
             {
-                "hf": self._get_height_field(f["hf"])
-                if "hf" in cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY
-                else f["hf"],
-                "ctr": self._get_footprint_contour(f["ctr"])
-                if "ctr" in cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY
-                else f["ctr"],
-                "seg": self._get_seg_map(f["seg"])
-                if "seg" in cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY
-                else f["seg"],
+                fld["name"]: fld["callback"](f[fld["name"]], cfg)
+                if fld["name"] in cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY
+                else f[fld["name"]]
+                for fld in self.fields
             }
             for f in tqdm(files, desc="Loading OSMLayout to RAM")
         ]
 
-    def _get_height_field(self, hf_file_path):
-        if utils.io.IO.get(hf_file_path) is None:
-            import logging
-
-            logging.error(hf_file_path)
+    @classmethod
+    def get_height_field(self, hf_file_path, cfg):
         return (
-            np.array(utils.io.IO.get(hf_file_path))
-            / self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT
+            np.array(utils.io.IO.get(hf_file_path)) / cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT
         )
 
-    def _get_footprint_contour(self, footprint_ctr_file_path):
+    @classmethod
+    def get_footprint_contour(self, footprint_ctr_file_path, _=None):
         return np.array(utils.io.IO.get(footprint_ctr_file_path).convert("L")) / 255.0
 
-    def _get_seg_map(self, seg_map_file_path):
+    @classmethod
+    def get_seg_map(self, seg_map_file_path, _=None):
         return np.array(utils.io.IO.get(seg_map_file_path).convert("P"))
 
     def _get_data_transforms(self, cfg, split):
@@ -173,6 +168,180 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                         "callback": "ToTensor",
                         "parameters": None,
                         "objects": ["hf", "ctr", "seg"],
+                    },
+                ]
+            )
+
+
+class GoogleEarthDataset(torch.utils.data.Dataset):
+    def __init__(self, cfg, split):
+        super().__init__()
+        self.cfg = cfg
+        self.split = split
+        self.fields = ["hf", "seg", "footage", "raycasting"]
+        self.memcached = {}
+        self.trajectories = self._get_trajectories(cfg, split)
+        self.n_trajectories = len(self.trajectories)
+        self.transforms = self._get_data_transforms(cfg, split)
+
+    def __len__(self):
+        return (
+            self.n_trajectories * self.cfg.DATASETS.GOOGLE_EARTH.N_REPEAT
+            if self.split == "train"
+            else self.n_trajectories
+        )
+
+    def __getitem__(self, idx):
+        trajectory = self.trajectories[idx % self.n_trajectories]
+
+        data = {"footage": self._get_footage_img(trajectory["footage"])}
+        raycasting = utils.io.IO.get(trajectory["raycasting"])
+        data["voxel_id"] = raycasting["voxel_id"]
+        data["depth2"] = raycasting["depth2"]
+        data["raydirs"] = raycasting["raydirs"]
+        data["cam_ori_t"] = raycasting["cam_ori_t"]
+        data["hf"] = self._get_hf_seg(
+            "hf",
+            trajectory,
+            raycasting["img_center"]["cx"],
+            raycasting["img_center"]["cy"],
+        )
+        data["seg"] = self._get_hf_seg(
+            "seg",
+            trajectory,
+            raycasting["img_center"]["cx"],
+            raycasting["img_center"]["cy"],
+        )
+        data = self.transforms(data)
+        return data
+
+    def _get_hf_seg(self, field, trajectory, cx, cy):
+        if field in self.cfg.DATASETS.GOOGLE_EARTH.PIN_MEMORY:
+            img = self.memcached[trajectory[field]]
+        elif field == "hf":
+            img = OsmLayoutDataset.get_height_field(trajectory[field], self.cfg)
+        elif field == "seg":
+            img = OsmLayoutDataset.get_seg_map(trajectory[field])
+        else:
+            raise Exception("Unknown field: %s" % field)
+
+        half_size = self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE // 2
+        tl_x, br_x = cx - half_size, cx + half_size
+        tl_y, br_y = cy - half_size, cy + half_size
+        return img[tl_y:br_y, tl_x:br_x]
+
+    def _get_trajectory_city(self, trajectory):
+        # Trajectory name example: US-SanFrancisco-Chinatown-R624-A354
+        return "-".join(trajectory.split("-")[:2])
+
+    def _get_trajectories(self, cfg, split):
+        trajectories = sorted(os.listdir(cfg.DATASETS.GOOGLE_EARTH.DIR))
+        trajectories = trajectories[:-1] if split == "train" else trajectories[-1:]
+        files = [
+            {
+                "hf": os.path.join(
+                    cfg.DATASETS.OSM_LAYOUT.DIR, self._get_trajectory_city(t), "hf.png"
+                ),
+                "seg": os.path.join(
+                    cfg.DATASETS.OSM_LAYOUT.DIR, self._get_trajectory_city(t), "seg.png"
+                ),
+                "footage": os.path.join(
+                    cfg.DATASETS.GOOGLE_EARTH.DIR, t, "footage", "%s_%02d.jpeg" % (t, i)
+                ),
+                "raycasting": os.path.join(
+                    cfg.DATASETS.GOOGLE_EARTH.DIR,
+                    t,
+                    "raycasting",
+                    "%s_%02d.pkl" % (t, i),
+                ),
+            }
+            for t in trajectories
+            for i in range(cfg.DATASETS.GOOGLE_EARTH.N_VIEWS)
+        ]
+        if not cfg.DATASETS.GOOGLE_EARTH.PIN_MEMORY:
+            return files
+
+        for f in tqdm(files, desc="Loading partial files to RAM"):
+            for k, v in f.items():
+                if k not in cfg.DATASETS.GOOGLE_EARTH.PIN_MEMORY:
+                    continue
+                elif v in self.memcached:
+                    continue
+                elif k == "hf":
+                    self.memcached[v] = OsmLayoutDataset.get_height_field(v, cfg)
+                elif k == "seg":
+                    self.memcached[v] = OsmLayoutDataset.get_seg_map(v)
+
+        return files
+
+    def _get_footage_img(self, img_file_path):
+        img = utils.io.IO.get(img_file_path)
+        return (np.array(img) / 255.0 - 0.5) * 2
+
+    def _get_data_transforms(self, cfg, split):
+        if split == "train":
+            return utils.data_transforms.Compose(
+                [
+                    {
+                        "callback": "RandomCrop",
+                        "parameters": {
+                            "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
+                            "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
+                        },
+                        "objects": ["voxel_id", "depth2", "raydirs", "footage"],
+                    },
+                    {
+                        "callback": "ToOneHot",
+                        "parameters": {
+                            "n_classes": cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+                        },
+                        "objects": ["seg"],
+                    },
+                    {
+                        "callback": "ToTensor",
+                        "parameters": None,
+                        "objects": [
+                            "hf",
+                            "seg",
+                            "voxel_id",
+                            "depth2",
+                            "raydirs",
+                            "cam_ori_t",
+                            "footage",
+                        ],
+                    },
+                ]
+            )
+        else:
+            return utils.data_transforms.Compose(
+                [
+                    {
+                        "callback": "CenterCrop",
+                        "parameters": {
+                            "height": cfg.TEST.GANCRAFT.CROP_SIZE[0],
+                            "width": cfg.TEST.GANCRAFT.CROP_SIZE[1],
+                        },
+                        "objects": ["voxel_id", "depth2", "raydirs", "footage"],
+                    },
+                    {
+                        "callback": "ToOneHot",
+                        "parameters": {
+                            "n_classes": cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+                        },
+                        "objects": ["seg"],
+                    },
+                    {
+                        "callback": "ToTensor",
+                        "parameters": None,
+                        "objects": [
+                            "hf",
+                            "seg",
+                            "voxel_id",
+                            "depth2",
+                            "raydirs",
+                            "cam_ori_t",
+                            "footage",
+                        ],
                     },
                 ]
             )

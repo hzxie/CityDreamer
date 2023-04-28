@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-18 22:06:55
+# @Last Modified at: 2023-04-28 15:47:22
 # @Email:  root@haozhexie.com
 
 import logging
@@ -30,7 +30,7 @@ def test(cfg, test_data_loader=None, vqae=None):
 
     if test_data_loader is None:
         test_data_loader = torch.utils.data.DataLoader(
-            dataset=utils.datasets.get_dataset(cfg, "OSM_LAYOUT", "test"),
+            dataset=utils.datasets.get_dataset(cfg, cfg.TEST.VQGAN.DATASET, "test"),
             batch_size=1,
             num_workers=cfg.CONST.N_WORKERS,
             collate_fn=utils.datasets.collate_fn,
@@ -52,10 +52,10 @@ def test(cfg, test_data_loader=None, vqae=None):
         ["RecLoss", "CtrLoss", "SegLoss", "QuantLoss", "TotalLoss"]
     )
     key_frames = {}
-    for idx, data in enumerate(test_data_loader):
+    for idx, img in enumerate(test_data_loader):
         with torch.no_grad():
-            input = utils.helpers.var_or_cuda(data["input"], vqae.device)
-            output = utils.helpers.var_or_cuda(data["output"], vqae.device)
+            input = utils.helpers.var_or_cuda(img, vqae.device)
+            output = utils.helpers.var_or_cuda(img, vqae.device)
             pred, quant_loss = vqae(input)
             rec_loss = l1_loss(pred[:, 0], output[:, 0])
             ctr_loss = bce_loss(torch.sigmoid(pred[:, 1]), output[:, 1])
@@ -76,14 +76,18 @@ def test(cfg, test_data_loader=None, vqae=None):
                 ]
             )
 
-            key_frames["Image/%04d/HeightField" % idx] = utils.helpers.tensor_to_image(
+            key_frames[
+                "VQGAN/Image/%04d/HeightField" % idx
+            ] = utils.helpers.tensor_to_image(
                 torch.cat([pred[:, 0], output[:, 0]], dim=2), "HeightField"
             )
-            key_frames["Image/%04d/FootprintCtr" % idx] = utils.helpers.tensor_to_image(
+            key_frames[
+                "VQGAN/Image/%04d/FootprintCtr" % idx
+            ] = utils.helpers.tensor_to_image(
                 torch.cat([torch.sigmoid(pred[:, 1]), output[:, 1]], dim=2),
                 "FootprintCtr",
             )
-            key_frames["Image/%04d/SegMap" % idx] = utils.helpers.tensor_to_image(
+            key_frames["VQGAN/Image/%04d/SegMap" % idx] = utils.helpers.tensor_to_image(
                 utils.helpers.onehot_to_mask(
                     torch.cat(
                         [

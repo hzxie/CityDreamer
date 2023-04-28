@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-18 22:10:38
+# @Last Modified at: 2023-04-28 16:09:26
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -68,7 +68,7 @@ def onehot_to_mask(onehot, ignored_classes=[]):
 
 
 def tensor_to_image(tensor, mode):
-    # assert mode in ["HeightField", "FootprintCtr", "SegMap"]
+    # assert mode in ["HeightField", "FootprintCtr", "SegMap", "RGB"]
     tensor = tensor.cpu().numpy()
     if mode == "HeightField":
         return tensor.transpose((1, 2, 0)).squeeze() / np.max(tensor)
@@ -76,5 +76,7 @@ def tensor_to_image(tensor, mode):
         return tensor.transpose((1, 2, 0)).squeeze()
     elif mode == "SegMap":
         return get_seg_map(tensor.squeeze()).convert("RGB")
+    elif mode == "RGB":
+        return tensor.squeeze().transpose((1, 2, 0)) / 2 + 0.5
     else:
         raise Exception("Unknown mode: %s" % mode)

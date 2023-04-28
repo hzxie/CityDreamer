@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-10 21:08:07
+# @Last Modified at: 2023-04-21 19:49:26
 # @Email:  root@haozhexie.com
 
 
@@ -17,6 +17,7 @@ import sys
 
 import core.vqgan
 import core.sampler
+import core.gancraft
 
 from pprint import pprint
 from datetime import datetime
@@ -44,7 +45,7 @@ def get_args_from_command_line():
         "-n",
         "--network",
         dest="network",
-        help="The network name to train or test. ['VQGAN', 'Sampler']",
+        help="The network name to train or test. ['VQGAN', 'Sampler', 'GANCraft']",
         default=None,
         type=str,
     )
@@ -114,6 +115,8 @@ def main():
             core.vqgan.train(cfg)
         elif cfg.CONST.NETWORK == "Sampler":
             core.sampler.train(cfg)
+        elif cfg.CONST.NETWORK == "GANCraft":
+            core.gancraft.train(cfg)
         else:
             raise Exception("Unknown network: %s" % cfg.CONST.NETWORK)
     else:
@@ -125,6 +128,8 @@ def main():
             core.vqgan.test(cfg)
         elif cfg.CONST.NETWORK == "Sampler":
             core.sampler.test(cfg)
+        elif cfg.CONST.NETWORK == "GANCraft":
+            core.gancraft.test(cfg)
         else:
             raise Exception("Unknown network: %s" % cfg.CONST.NETWORK)
 

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-18 19:20:03
+# @Last Modified at: 2023-04-28 16:10:37
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -24,6 +24,12 @@ cfg.DATASETS.OSM_LAYOUT.DIR                      = "./data/osm"
 cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES          = [0]
 cfg.DATASETS.OSM_LAYOUT.N_CLASSES                = 7
 cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT               = 640
+cfg.DATASETS.GOOGLE_EARTH                        = EasyDict()
+cfg.DATASETS.GOOGLE_EARTH.PIN_MEMORY             = ["hf", "seg"]
+cfg.DATASETS.GOOGLE_EARTH.N_REPEAT               = 2
+cfg.DATASETS.GOOGLE_EARTH.N_VIEWS                = 60
+cfg.DATASETS.GOOGLE_EARTH.DIR                    = "./data/ges"
+cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
 
 #
 # Constants
@@ -96,9 +102,6 @@ cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM           = 256
 cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM            = 256
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA        = 1
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR        = 64
-cfg.NETWORK.GANCRAFT.SKY_IN_CHANNEL_BASE         = 3
-cfg.NETWORK.GANCRAFT.SKY_POS_EMD_DEG             = 5
-cfg.NETWORK.GANCRAFT.SKY_INC_ORIG_RAYDIR         = True
 
 #
 # Train
@@ -126,12 +129,28 @@ cfg.TRAIN.SAMPLER.N_WARMUP_ITERS                 = 7500
 cfg.TRAIN.SAMPLER.LR                             = 2e-4
 cfg.TRAIN.SAMPLER.WEIGHT_DECAY                   = 0
 cfg.TRAIN.SAMPLER.BETAS                          = (0.9, 0.999)
+# GANCraft
+cfg.TRAIN.GANCRAFT                               = EasyDict()
+cfg.TRAIN.GANCRAFT.DATASET                       = "GOOGLE_EARTH"
+cfg.TRAIN.GANCRAFT.N_EPOCHS                      = 500
+cfg.TRAIN.GANCRAFT.CKPT_SAVE_FREQ                = 25
+cfg.TRAIN.GANCRAFT.BATCH_SIZE                    = 1
+cfg.TRAIN.GANCRAFT.LR                            = 1e-4
+cfg.TRAIN.GANCRAFT.EPS                           = 1e-7
+cfg.TRAIN.GANCRAFT.WEIGHT_DECAY                  = 0
+cfg.TRAIN.GANCRAFT.BETAS                         = (0., 0.999)
+cfg.TRAIN.GANCRAFT.CROP_SIZE                     = (256, 256)
 
 #
 # Test
 #
 cfg.TEST                                         = EasyDict()
+cfg.TEST.VQGAN                                   = EasyDict()
+cfg.TEST.VQGAN.DATASET                           = "OSM_LAYOUT"
 cfg.TEST.SAMPLER                                 = EasyDict()
 cfg.TEST.SAMPLER.N_SAMPLES                       = 2
 cfg.TEST.SAMPLER.TEMPERATURES                    = [0.5, 1.0, 2.0]
+cfg.TEST.GANCRAFT                                = EasyDict()
+cfg.TEST.GANCRAFT.DATASET                        = "GOOGLE_EARTH"
+cfg.TEST.GANCRAFT.CROP_SIZE                      = (480, 270)
 # fmt: on
