@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 16:10:37
+# @Last Modified at: 2023-04-28 16:13:25
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -112,7 +112,7 @@ cfg.TRAIN.VQGAN                                  = EasyDict()
 cfg.TRAIN.VQGAN.DATASET                          = "OSM_LAYOUT"
 cfg.TRAIN.VQGAN.N_EPOCHS                         = 500
 cfg.TRAIN.VQGAN.REC_LOSS_FACTOR                  = 10
-cfg.TRAIN.VQGAN.CTR_LOSS_FACTOR                  = 10
+cfg.TRAIN.VQGAN.CTR_LOSS_FACTOR                  = 2
 cfg.TRAIN.VQGAN.SEG_LOSS_FACTOR                  = 1
 cfg.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 25
 cfg.TRAIN.VQGAN.BATCH_SIZE                       = 2
