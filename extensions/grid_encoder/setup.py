@@ -4,7 +4,7 @@
 # @Author: Jiaxiang Tang (@ashawkey)
 # @Date:   2023-04-15 10:33:32
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-15 11:01:08
+# @Last Modified at: 2023-04-29 10:47:10
 # @Email:  ashawkey1999@gmail.com
 # @Ref: https://github.com/ashawkey/torch-ngp
 
@@ -19,7 +19,7 @@ setup(
             name="grid_encoder_ext",
             sources=[
                 "grid_encoder_ext.cu",
-                "grid_encoder_ext_cuda.cpp",
+                "bindings.cpp",
             ],
             extra_compile_args={
                 "cxx": ["-O3", "-std=c++14"],

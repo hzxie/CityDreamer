@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-24 20:35:43
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-15 10:37:12
+# @Last Modified at: 2023-04-29 10:47:30
 # @Email:  root@haozhexie.com
 
 from setuptools import setup
@@ -17,7 +17,7 @@ setup(
         CUDAExtension(
             "extrude_tensor_ext",
             [
-                "extrude_tensor_ext_cuda.cpp",
+                "bindings.cpp",
                 "extrude_tensor_ext.cu",
             ],
         ),
