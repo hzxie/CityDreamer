@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-21 19:49:26
+# @Last Modified at: 2023-04-29 12:57:29
 # @Email:  root@haozhexie.com
 
 
@@ -18,13 +18,14 @@ import sys
 import core.vqgan
 import core.sampler
 import core.gancraft
+import utils.distributed
 
 from pprint import pprint
 from datetime import datetime
 
 
 def get_args_from_command_line():
-    parser = argparse.ArgumentParser(description="The argument parser of the runner")
+    parser = argparse.ArgumentParser()
     parser.add_argument(
         "-e",
         "--exp",
@@ -75,6 +76,12 @@ def get_args_from_command_line():
     parser.add_argument(
         "--test", dest="test", help="Test the network.", action="store_true"
     )
+    parser.add_argument(
+        "--local_rank",
+        type=int,
+        help="The rank ID of the GPU. Automatically assigned by torch.distributed.",
+        default=os.getenv("LOCAL_RANK", 0),
+    )
     args = parser.parse_args()
     return args
 
@@ -102,12 +109,14 @@ def main():
         raise Exception("No checkpoints")
 
     # Print the current config
-    local_rank = 0
-    if torch.cuda.is_available() and not args.test:
-        torch.distributed.init_process_group("nccl")
-        local_rank = torch.distributed.get_rank()
-    if local_rank == 0:
+    local_rank = args.local_rank
+    if utils.distributed.is_master():
         pprint(cfg)
+
+    # Initialize the DDP environment
+    if torch.cuda.is_available() and not args.test:
+        utils.distributed.set_affinity(local_rank)
+        utils.distributed.init_dist(local_rank)
 
     # Start train/test processes
     if not args.test:

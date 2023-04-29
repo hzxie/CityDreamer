@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 15:01:07
+# @Last Modified at: 2023-04-29 14:42:54
 # @Email:  root@haozhexie.com
 
 import logging
@@ -16,6 +16,7 @@ import core.vqgan.test
 import models.vqgan
 import utils.average_meter
 import utils.datasets
+import utils.distributed
 import utils.helpers
 import utils.summary_writer
 
@@ -26,14 +27,12 @@ from time import time
 def train(cfg):
     torch.backends.cudnn.benchmark = True
     # Set up networks
-    local_rank = 0
+    local_rank = utils.distributed.get_rank()
     vqae = models.vqgan.VQAutoEncoder(cfg)
     if torch.cuda.is_available():
-        local_rank = torch.distributed.get_rank()
         logging.info("Start running the DDP on rank %d." % local_rank)
-        device_id = local_rank % torch.cuda.device_count()
         vqae = torch.nn.parallel.DistributedDataParallel(
-            vqae.to(device_id), device_ids=[device_id]
+            vqae.to(local_rank), device_ids=[local_rank]
         )
     else:
         vqae.device = torch.device("cpu")
@@ -93,13 +92,12 @@ def train(cfg):
         logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
 
     # Set up folders for logs, snapshot and checkpoints
-    output_dir = os.path.join(cfg.DIR.OUTPUT, "%s", cfg.CONST.EXP_NAME)
-    cfg.DIR.CHECKPOINTS = output_dir % "checkpoints"
-    cfg.DIR.LOGS = output_dir % "logs"
-    os.makedirs(cfg.DIR.CHECKPOINTS, exist_ok=True)
-
-    # Summary writer
-    if local_rank == 0:
+    if utils.distributed.is_master():
+        output_dir = os.path.join(cfg.DIR.OUTPUT, "%s", cfg.CONST.EXP_NAME)
+        cfg.DIR.CHECKPOINTS = output_dir % "checkpoints"
+        cfg.DIR.LOGS = output_dir % "logs"
+        os.makedirs(cfg.DIR.CHECKPOINTS, exist_ok=True)
+        # Summary writer
         tb_writer = utils.summary_writer.SummaryWriter(cfg)
 
     # Training/Testing the network
@@ -116,12 +114,12 @@ def train(cfg):
             train_sampler.set_epoch(epoch_idx)
 
         batch_end_time = time()
-        for batch_idx, img in enumerate(train_data_loader):
+        for batch_idx, data in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
             data_time.update(time() - batch_end_time)
 
-            input = utils.helpers.var_or_cuda(img, vqae.device)
-            output = utils.helpers.var_or_cuda(img, vqae.device)
+            input = utils.helpers.var_or_cuda(data["img"], vqae.device)
+            output = utils.helpers.var_or_cuda(data["img"], vqae.device)
             pred, quant_loss = vqae(input)
             rec_loss = l1_loss(pred[:, 0], output[:, 0])
             ctr_loss = bce_loss(torch.sigmoid(pred[:, 1]), output[:, 1])
@@ -147,7 +145,7 @@ def train(cfg):
 
             batch_time.update(time() - batch_end_time)
             batch_end_time = time()
-            if local_rank == 0:
+            if utils.distributed.is_master():
                 tb_writer.add_scalars(
                     {
                         "VQGAN/Loss/Batch/Rec": losses.val(0),
@@ -170,9 +168,10 @@ def train(cfg):
                         ["%.4f" % l for l in losses.val()],
                     )
                 )
+            break
 
         epoch_end_time = time()
-        if local_rank == 0:
+        if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
                     "VQGAN/Loss/Epoch/Rec/Train": losses.avg(0),
@@ -195,7 +194,7 @@ def train(cfg):
 
         # Evaluate the current model
         losses, key_frames = core.vqgan.test(cfg, val_data_loader, vqae)
-        if local_rank == 0:
+        if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
                     "VQGAN/Loss/Epoch/Rec/Test": losses.avg(0),
@@ -225,5 +224,5 @@ def train(cfg):
                     ),
                 )
 
-    if local_rank == 0:
+    if utils.distributed.is_master():
         tb_writer.close()

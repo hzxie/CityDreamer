@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 16:05:53
+# @Last Modified at: 2023-04-29 12:37:15
 # @Email:  root@haozhexie.com
 
 import logging
@@ -13,15 +13,12 @@ import torch
 import models.gancraft
 import utils.average_meter
 import utils.datasets
+import utils.distributed
 import utils.helpers
 
 
 def test(cfg, test_data_loader=None, gancraft=None):
     torch.backends.cudnn.benchmark = True
-    local_rank = 0
-    if torch.cuda.is_available():
-        local_rank = torch.distributed.get_rank()
-
     if gancraft is None:
         gancraft = models.gancraft.GanCraftGenerator(cfg)
         if torch.cuda.is_available():
@@ -67,9 +64,11 @@ def test(cfg, test_data_loader=None, gancraft=None):
             loss = l1_loss(fake_imgs, footage)
             test_losses.update([loss.item()])
 
-            if local_rank == 0:
+            if utils.distributed.is_master():
                 if idx < 3:
-                    key_frames["GANCraft/Image/%04d" % idx] = utils.helpers.tensor_to_image(
+                    key_frames[
+                        "GANCraft/Image/%04d" % idx
+                    ] = utils.helpers.tensor_to_image(
                         torch.cat([fake_imgs, footage], dim=3), "RGB"
                     )
                 logging.info(

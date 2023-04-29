@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 16:09:46
+# @Last Modified at: 2023-04-29 14:43:07
 # @Email:  root@haozhexie.com
 
 
@@ -17,6 +17,7 @@ import core.gancraft.test
 import models.gancraft
 import utils.average_meter
 import utils.datasets
+import utils.distributed
 import utils.helpers
 import utils.summary_writer
 
@@ -27,14 +28,12 @@ from time import time
 def train(cfg):
     torch.backends.cudnn.benchmark = True
     # Set up networks
-    local_rank = 0
+    local_rank = utils.distributed.get_rank()
     gancraft = models.gancraft.GanCraftGenerator(cfg)
     if torch.cuda.is_available():
-        local_rank = torch.distributed.get_rank()
         logging.info("Start running the DDP on rank %d." % local_rank)
-        device_id = local_rank % torch.cuda.device_count()
         gancraft = torch.nn.parallel.DistributedDataParallel(
-            gancraft.to(device_id), device_ids=[device_id]
+            gancraft.to(local_rank), device_ids=[local_rank]
         )
     else:
         gancraft.device = torch.device("cpu")
@@ -91,13 +90,12 @@ def train(cfg):
         logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
 
     # Set up folders for logs, snapshot and checkpoints
-    output_dir = os.path.join(cfg.DIR.OUTPUT, "%s", cfg.CONST.EXP_NAME)
-    cfg.DIR.CHECKPOINTS = output_dir % "checkpoints"
-    cfg.DIR.LOGS = output_dir % "logs"
-    os.makedirs(cfg.DIR.CHECKPOINTS, exist_ok=True)
-
-    # Summary writer
-    if local_rank == 0:
+    if utils.distributed.is_master():
+        output_dir = os.path.join(cfg.DIR.OUTPUT, "%s", cfg.CONST.EXP_NAME)
+        cfg.DIR.CHECKPOINTS = output_dir % "checkpoints"
+        cfg.DIR.LOGS = output_dir % "logs"
+        os.makedirs(cfg.DIR.CHECKPOINTS, exist_ok=True)
+        # Summary writer
         tb_writer = utils.summary_writer.SummaryWriter(cfg)
 
     # Training/Testing the network
@@ -134,7 +132,7 @@ def train(cfg):
 
             batch_time.update(time() - batch_end_time)
             batch_end_time = time()
-            if local_rank == 0:
+            if utils.distributed.is_master():
                 tb_writer.add_scalars(
                     {
                         "GANCraft/Loss/Batch/RecLoss": losses.val(0),
@@ -155,7 +153,7 @@ def train(cfg):
                 )
 
         epoch_end_time = time()
-        if local_rank == 0:
+        if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
                     "GANCraft/Loss/Epoch/Rec/Train": losses.avg(0),
@@ -174,7 +172,7 @@ def train(cfg):
 
         # Evaluate the current model
         losses, key_frames = core.gancraft.test(cfg, val_data_loader, gancraft)
-        if local_rank == 0:
+        if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
                     "GANCraft/Loss/Epoch/Rec/Test": losses.avg(0),
@@ -200,5 +198,5 @@ def train(cfg):
                     ),
                 )
 
-    if local_rank == 0:
+    if utils.distributed.is_master():
         tb_writer.close()

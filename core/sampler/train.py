@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 14:59:49
+# @Last Modified at: 2023-04-29 14:42:45
 # @Email:  root@haozhexie.com
 
 import logging
@@ -18,6 +18,7 @@ import models.vqgan
 import models.sampler
 import utils.average_meter
 import utils.datasets
+import utils.distributed
 import utils.helpers
 import utils.summary_writer
 
@@ -27,18 +28,17 @@ from time import time
 def train(cfg):
     torch.backends.cudnn.benchmark = True
     # Set up networks
-    local_rank = 0
+    local_rank = utils.distributed.get_rank()
     vqae = models.vqgan.VQAutoEncoder(cfg)
     sampler = models.sampler.AbsorbingDiffusionSampler(cfg)
     if torch.cuda.is_available():
         local_rank = torch.distributed.get_rank()
         logging.info("Start running the DDP on rank %d." % local_rank)
-        device_id = local_rank % torch.cuda.device_count()
         vqae = torch.nn.parallel.DistributedDataParallel(
-            vqae.to(device_id), device_ids=[device_id]
+            vqae.to(local_rank), device_ids=[local_rank]
         )
         sampler = torch.nn.parallel.DistributedDataParallel(
-            sampler.to(device_id), device_ids=[device_id]
+            sampler.to(local_rank), device_ids=[local_rank]
         )
     else:
         vqae.device = torch.device("cpu")
@@ -86,13 +86,12 @@ def train(cfg):
     ce_loss = torch.nn.CrossEntropyLoss(ignore_index=-1, reduction="none")
 
     # Set up folders for logs, snapshot and checkpoints
-    output_dir = os.path.join(cfg.DIR.OUTPUT, "%s", cfg.CONST.EXP_NAME)
-    cfg.DIR.CHECKPOINTS = output_dir % "checkpoints"
-    cfg.DIR.LOGS = output_dir % "logs"
-    os.makedirs(cfg.DIR.CHECKPOINTS, exist_ok=True)
-
-    # Summary writer
-    if local_rank == 0:
+    if utils.distributed.is_master():
+        output_dir = os.path.join(cfg.DIR.OUTPUT, "%s", cfg.CONST.EXP_NAME)
+        cfg.DIR.CHECKPOINTS = output_dir % "checkpoints"
+        cfg.DIR.LOGS = output_dir % "logs"
+        os.makedirs(cfg.DIR.CHECKPOINTS, exist_ok=True)
+        # Summary writer
         tb_writer = utils.summary_writer.SummaryWriter(cfg)
 
     # Training/Testing the network
@@ -107,7 +106,7 @@ def train(cfg):
             train_sampler.set_epoch(epoch_idx)
 
         batch_end_time = time()
-        for batch_idx, img in enumerate(train_data_loader):
+        for batch_idx, data in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
             data_time.update(time() - batch_end_time)
             # Warm up the optimizer
@@ -116,7 +115,7 @@ def train(cfg):
                 for pg in optimizer.param_groups:
                     pg["lr"] = lr
 
-            input = utils.helpers.var_or_cuda(img, vqae.device)
+            input = utils.helpers.var_or_cuda(data["img"], vqae.device)
             with torch.no_grad():
                 _, _, info = vqae.module.encode(input)
 
@@ -142,7 +141,7 @@ def train(cfg):
 
             batch_time.update(time() - batch_end_time)
             batch_end_time = time()
-            if local_rank == 0:
+            if utils.distributed.is_master():
                 tb_writer.add_scalars(
                     {
                         "Sampler/Loss/Batch/CodeIndex": losses.val(0),
@@ -165,7 +164,7 @@ def train(cfg):
                 )
 
         epoch_end_time = time()
-        if local_rank == 0:
+        if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
                     "Sampler/Loss/Epoch/CodeIndex/Train": losses.avg(0),
@@ -186,7 +185,7 @@ def train(cfg):
 
         # Evaluate the current model
         key_frames = core.sampler.test(cfg, vqae, sampler)
-        if local_rank == 0:
+        if utils.distributed.is_master():
             tb_writer.add_images(key_frames, epoch_idx)
             # Save ckeckpoints
             logging.info("Saved checkpoint to ckpt-last.pth ...")
@@ -207,5 +206,5 @@ def train(cfg):
                     ),
                 )
 
-    if local_rank == 0:
+    if utils.distributed.is_master():
         tb_writer.close()

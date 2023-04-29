@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 15:32:51
+# @Last Modified at: 2023-04-29 12:52:10
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -73,7 +73,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
 
         img = self.transforms(data)
         img = torch.cat([data[f["name"]] for f in self.fields], dim=0)
-        return img
+        return {"img": img}
 
     def _get_cities(self, cfg, split):
         cities = sorted(os.listdir(cfg.DATASETS.OSM_LAYOUT.DIR))

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 15:47:22
+# @Last Modified at: 2023-04-29 12:53:14
 # @Email:  root@haozhexie.com
 
 import logging
@@ -52,10 +52,10 @@ def test(cfg, test_data_loader=None, vqae=None):
         ["RecLoss", "CtrLoss", "SegLoss", "QuantLoss", "TotalLoss"]
     )
     key_frames = {}
-    for idx, img in enumerate(test_data_loader):
+    for idx, data in enumerate(test_data_loader):
         with torch.no_grad():
-            input = utils.helpers.var_or_cuda(img, vqae.device)
-            output = utils.helpers.var_or_cuda(img, vqae.device)
+            input = utils.helpers.var_or_cuda(data["img"], vqae.device)
+            output = utils.helpers.var_or_cuda(data["img"], vqae.device)
             pred, quant_loss = vqae(input)
             rec_loss = l1_loss(pred[:, 0], output[:, 0])
             ctr_loss = bce_loss(torch.sigmoid(pred[:, 1]), output[:, 1])
