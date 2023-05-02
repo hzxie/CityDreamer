@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-01 11:18:46
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-01 18:30:17
+# @Last Modified at: 2023-05-02 15:07:00
 # @Email:  root@haozhexie.com
 #
 # Quick Start
@@ -26,9 +26,6 @@ import torch
 
 from PIL import Image
 from tqdm import tqdm
-
-PROJECT_HOME = os.path.abspath(os.path.join(os.path.dirname(__file__), os.path.pardir))
-sys.path.append(PROJECT_HOME)
 
 
 def get_e2fgvi_model(e2fgvi_home, ckpt_file_path):
@@ -149,6 +146,9 @@ def main(e2fgvi_home, ckpt_file_path, ges_dir):
 
 
 if __name__ == "__main__":
+    PROJECT_HOME = os.path.abspath(
+        os.path.join(os.path.dirname(__file__), os.path.pardir)
+    )
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--e2fgvi_home",
