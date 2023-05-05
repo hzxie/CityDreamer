@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 15:14:59
+# @Last Modified at: 2023-05-05 15:06:17
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -25,7 +25,7 @@ class GanCraftGenerator(torch.nn.Module):
             in_channels=5,
             n_levels=cfg.NETWORK.GANCRAFT.GRID_N_LEVELS,
             lvl_channels=cfg.NETWORK.GANCRAFT.GRID_LEVEL_DIM,
-            desired_resolution=cfg.NETWORK.VQGAN.RESOLUTION,
+            desired_resolution=cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
         )
         self.render_net = RenderMLP(cfg)
         self.denoiser = RenderCNN(cfg)
@@ -79,10 +79,14 @@ class GanCraftGenerator(torch.nn.Module):
             rand_depth, new_dists, new_idx = self._sample_depth_batched(
                 depth2,
                 n_samples,
-                deterministic=True,
+                deterministic=False,
                 use_box_boundaries=False,
                 sample_depth=3,
             )
+
+            nan_mask = torch.isnan(rand_depth)
+            inf_mask = torch.isinf(rand_depth)
+            rand_depth[nan_mask | inf_mask] = 0.0
             worldcoord2 = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
 
             # Generate per-sample segmentation label
@@ -113,6 +117,7 @@ class GanCraftGenerator(torch.nn.Module):
         )
         # If a ray exclusively hits the sky (no intersection with the voxels), set its weight to zero.
         weights = weights * torch.logical_not(sky_only_mask).float()
+        # print(weights.size())   # torch.Size([N, H, W, n_samples, 1])
 
         rgbs = torch.clamp(net_out_c, -1, 1) + 1
         net_out = torch.sum(weights * rgbs, dim=-2, keepdim=True)
@@ -197,6 +202,7 @@ class GanCraftGenerator(torch.nn.Module):
                 dim=-2,
             )
         rand_samples, _ = torch.sort(rand_samples, dim=-2, descending=False)
+
         midpoints = (rand_samples[..., 1:, :] + rand_samples[..., :-1, :]) / 2
         # print(midpoints.size())  # torch.Size([N, H, W, n_samples, 1])
         new_dists = rand_samples[..., 1:, :] - rand_samples[..., :-1, :]
@@ -252,8 +258,8 @@ class GanCraftGenerator(torch.nn.Module):
             net_out_c (N x H x W x L x C5 tensor): Color embeddings.
         """
         h, w, d = (
-            self.cfg.NETWORK.VQGAN.RESOLUTION,
-            self.cfg.NETWORK.VQGAN.RESOLUTION,
+            self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+            self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
             self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
         )
         delimeter = torch.tensor([h, w, d], device=worldcoord2.device)
@@ -269,6 +275,7 @@ class GanCraftGenerator(torch.nn.Module):
         )
         normalized_cord = torch.cat([normalized_cord, global_features], dim=-1)
         feature_in = self.grid_encoder(normalized_cord)
+
         net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot)
         return net_out_s, net_out_c
 
@@ -495,13 +502,12 @@ class RenderCNN(torch.nn.Module):
 
         Args:
             x (N x in_channels x H x W tensor): Intermediate feature map
-            z (N x cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM tensor): Style codes.
+            z (N x style_dim tensor): Style codes.
         """
         z = self.fc_z_cond(z)
         adapt = torch.chunk(z, 2 * 2, dim=-1)
 
         y = self.act(self.conv1(x))
-
         y = y + self.conv2b(self.act(self.conv2a(y)))
         y = self.act(self.modulate(y, adapt[0], adapt[1]))
 

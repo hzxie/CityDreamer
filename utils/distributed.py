@@ -67,7 +67,9 @@ def init_dist(local_rank, backend="nccl", **kwargs):
         if torch.distributed.is_initialized():
             return torch.cuda.current_device()
         torch.cuda.set_device(local_rank)
-        torch.distributed.init_process_group(backend=backend, init_method="env://", **kwargs)
+        torch.distributed.init_process_group(
+            backend=backend, init_method="env://", **kwargs
+        )
 
     # Increase the L2 fetch granularity for faster speed.
     _libcudart = ctypes.CDLL("libcudart.so")

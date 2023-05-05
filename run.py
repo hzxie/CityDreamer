@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-29 12:57:29
+# @Last Modified at: 2023-04-30 17:17:40
 # @Email:  root@haozhexie.com
 
 
@@ -110,7 +110,7 @@ def main():
 
     # Print the current config
     local_rank = args.local_rank
-    if utils.distributed.is_master():
+    if local_rank == 0:
         pprint(cfg)
 
     # Initialize the DDP environment

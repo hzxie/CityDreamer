@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-01 10:27:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-02 19:48:31
+# @Last Modified at: 2023-05-02 20:17:32
 # @Email:  root@haozhexie.com
 #
 # Quick Start
@@ -89,6 +89,7 @@ def get_seg_map(seg_map, seg_map_classes, all_classes, unknown_classes):
     CLASS_MAPPER = {
         "road": 1,
         "railroad": 1,
+        "bridge": 1,
         "building": 2,
         "house": 2,
         "roof": 2,
@@ -109,7 +110,7 @@ def get_seg_map(seg_map, seg_map_classes, all_classes, unknown_classes):
         if cat_name not in CLASS_MAPPER:
             if cat_name not in unknown_classes:
                 unknown_classes.add(cat_name)
-                logging.warning("Class[Name=%s] is not defined." % cat_name)
+                logging.warning("Class[Name=%s] is ignored." % cat_name)
             continue
         new_cat_id = CLASS_MAPPER[cat_name]
         cg_seg_map[seg_map == cat_id] = new_cat_id
@@ -140,7 +141,7 @@ def get_frames_with_seg_map(frame, seg_map):
     return Image.fromarray((frame * 0.6 + seg_map * 0.4).astype(np.uint8))
 
 
-def main(seem_home, seem_cfg, ges_dir, output_dir, batch_size):
+def main(seem_home, seem_cfg, ges_dir, output_dir, batch_size, debug):
     sys.path.append(os.path.join(seem_home))
     # Set up SEEM model
     model, all_classes = get_seem_model(seem_home, seem_cfg)
@@ -161,6 +162,19 @@ def main(seem_home, seem_cfg, ges_dir, output_dir, batch_size):
         frames = [Image.open(os.path.join(ges_dir, gep, "footage", f)) for f in files]
         tr_frames = [get_transformed_image(f, transformer) for f in frames]
         n_batches = math.ceil(len(frames) / batch_size)
+
+        # Skip folders that all seg maps are generated
+        _output_dir = os.path.join(ges_dir, gep, output_dir)
+        if os.path.exists(_output_dir):
+            are_all_files_generated = True
+            expected_files = ["%s.png" % os.path.splitext(fn)[1] for fn in files]
+            for ef in expected_files:
+                if not os.path.exists(os.path.join(ef)):
+                    are_all_files_generated = False
+            if are_all_files_generated:
+                continue
+
+        os.makedirs(_output_dir, exist_ok=True)
         for i in range(n_batches):
             s_idx = batch_size * i
             e_idx = s_idx + batch_size
@@ -169,18 +183,20 @@ def main(seem_home, seem_cfg, ges_dir, output_dir, batch_size):
             _tr_frames = tr_frames[s_idx:e_idx]
             with torch.no_grad():
                 _results = model.model.evaluate(_tr_frames)
-                _output_dir = os.path.join(ges_dir, gep, output_dir)
-                os.makedirs(_output_dir, exist_ok=True)
-                for fr, r, fn in zip(_frames, _results, _files):
-                    seg_map = get_seg_map(
-                        r["panoptic_seg"][0].cpu().numpy(),
-                        r["panoptic_seg"][1],
-                        all_classes,
-                        unknown_classes,
-                    )
-                    seg_map.save(os.path.join(_output_dir, "%s.png" % os.path.basename(fn)))
+
+            torch.cuda.empty_cache()
+            for fr, r, fn in zip(_frames, _results, _files):
+                seg_map = get_seg_map(
+                    r["panoptic_seg"][0].cpu().numpy(),
+                    r["panoptic_seg"][1],
+                    all_classes,
+                    unknown_classes,
+                )
+                basename, _ = os.path.splitext(fn)
+                seg_map.save(os.path.join(_output_dir, "%s.png" % basename))
+                if debug:
                     get_frames_with_seg_map(fr, seg_map).save(
-                        os.path.join(_output_dir, "%s.jpg" % os.path.basename(fn))
+                        os.path.join(_output_dir, "%s.jpg" % basename)
                     )
 
 
@@ -206,6 +222,14 @@ if __name__ == "__main__":
     parser.add_argument("--ges_dir", default=os.path.join(PROJECT_HOME, "data", "ges"))
     parser.add_argument("--batch_size", default=16)
     parser.add_argument("--output_dir", default="seg")
+    parser.add_argument("--debug", action="store_true")
     args = parser.parse_args()
 
-    main(args.seem_home, args.seem_cfg, args.ges_dir, args.output_dir, args.batch_size)
+    main(
+        args.seem_home,
+        args.seem_cfg,
+        args.ges_dir,
+        args.output_dir,
+        args.batch_size,
+        args.debug,
+    )
