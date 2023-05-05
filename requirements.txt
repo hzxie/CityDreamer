@@ -6,6 +6,7 @@ mayavi
 numpy
 opencv-python
 pillow
+pynvml
 tensorboard
 torch
 torchvision
