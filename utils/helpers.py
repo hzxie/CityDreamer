@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 16:09:26
+# @Last Modified at: 2023-05-03 20:15:59
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -25,10 +25,19 @@ def var_or_cuda(x, device=None):
     return x
 
 
-def get_seg_map(seg_map):
-    PALETTE = np.array([[i, i, i] for i in range(256)])
+def static_vars(**kwargs):
+    def decorate(func):
+        for k in kwargs:
+            setattr(func, k, kwargs[k])
+        return func
+
+    return decorate
+
+
+def get_seg_map_palette():
+    palatte = np.array([[i, i, i] for i in range(256)])
     # fmt: off
-    PALETTE[:7] = np.array(
+    palatte[:7] = np.array(
         [
             [0, 0, 0],       # empty        -> black (ONLY used in voxel)
             [96, 0, 0],      # highway      -> red
@@ -40,9 +49,34 @@ def get_seg_map(seg_map):
         ]
     )
     # fmt: on
+    return palatte
+
+
+@static_vars(palatte=get_seg_map_palette())
+def get_seg_map(seg_map):
+    if np.max(seg_map) >= 7:
+        return get_ins_seg_map(seg_map)
+
     seg_map = Image.fromarray(seg_map.astype(np.uint8))
-    seg_map.putpalette(PALETTE.reshape(-1).tolist())
+    seg_map.putpalette(get_seg_map.palatte.reshape(-1).tolist())
     return seg_map
+
+
+def get_ins_seg_map_palette(legacy_palette):
+    MAX_N_INSTANCES = 32768
+    palatte = np.random.randint(256, size=(MAX_N_INSTANCES, 3))
+    palatte[:7] = legacy_palette[:7]
+    return palatte
+
+
+@static_vars(palatte=get_ins_seg_map_palette(get_seg_map_palette()))
+def get_ins_seg_map(seg_map):
+    h, w = seg_map.shape
+    seg_map_rgb = np.zeros((h, w, 3), dtype=np.uint8)
+    for i in range(np.max(seg_map)):
+        seg_map_rgb[seg_map == i] = get_ins_seg_map.palatte[i]
+
+    return Image.fromarray(seg_map_rgb)
 
 
 def mask_to_onehot(mask, n_class, ignored_classes=[]):

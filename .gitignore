@@ -158,7 +158,10 @@ cython_debug/
 #  be found at https://github.com/github/gitignore/blob/main/Global/JetBrains.gitignore
 #  and can be added to the global gitignore or merged into this file.  For a more nuclear
 #  option (not recommended) you can uncomment the following to ignore the entire idea folder.
-#.idea/
+idea/
+
+# VSCode
+.vscode/
 
 # ---> JupyterNotebooks
 # gitignore template for Jupyter Notebooks
@@ -170,9 +173,6 @@ cython_debug/
 # IPython
 profile_default/
 ipython_config.py
-
-# Remove previous ipynb_checkpoints
-#   git rm -r .ipynb_checkpoints/
 
 # User data
 configs/
