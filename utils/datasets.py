@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-29 12:52:10
+# @Last Modified at: 2023-05-06 14:36:51
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -200,6 +200,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
         data["depth2"] = raycasting["depth2"]
         data["raydirs"] = raycasting["raydirs"]
         data["cam_ori_t"] = raycasting["cam_ori_t"]
+        data["mask"] = raycasting["mask"]
         data["hf"] = self._get_hf_seg(
             "hf",
             trajectory,
@@ -237,6 +238,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
     def _get_trajectories(self, cfg, split):
         trajectories = sorted(os.listdir(cfg.DATASETS.GOOGLE_EARTH.DIR))
         trajectories = trajectories[:-1] if split == "train" else trajectories[-1:]
+        trajectories = ["US-NewYork-1NewYorkPlaza-R813-A884"]
         files = [
             {
                 "hf": os.path.join(
@@ -288,7 +290,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                             "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
                             "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
                         },
-                        "objects": ["voxel_id", "depth2", "raydirs", "footage"],
+                        "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
                     },
                     {
                         "callback": "ToOneHot",
@@ -308,6 +310,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                             "raydirs",
                             "cam_ori_t",
                             "footage",
+                            "mask",
                         ],
                     },
                 ]
@@ -321,7 +324,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                             "height": cfg.TEST.GANCRAFT.CROP_SIZE[0],
                             "width": cfg.TEST.GANCRAFT.CROP_SIZE[1],
                         },
-                        "objects": ["voxel_id", "depth2", "raydirs", "footage"],
+                        "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
                     },
                     {
                         "callback": "ToOneHot",
@@ -341,6 +344,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                             "raydirs",
                             "cam_ori_t",
                             "footage",
+                            "mask",
                         ],
                     },
                 ]

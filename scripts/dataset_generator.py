@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-05 14:47:17
+# @Last Modified at: 2023-05-06 16:05:23
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -387,7 +387,7 @@ def get_google_earth_aligned_seg_maps(
     metadata,
     zoom_level,
     tensor_extruder,
-    debug
+    debug,
 ):
     logging.info("Parsing Google Earth Project: %s" % ge_project_name)
     ge_camera_poses = _get_google_earth_camera_poses(ge_project_name, google_earth_dir)
@@ -522,8 +522,12 @@ def get_google_earth_aligned_seg_maps(
         )
         # print(voxel_id.size())    # torch.Size([540, 960, 10, 1])
         if debug:
-            seg_map = utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy())
-            seg_maps.append(_get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t))
+            seg_map = utils.helpers.get_seg_map(
+                voxel_id.squeeze()[..., 0].cpu().numpy()
+            )
+            seg_maps.append(
+                _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t)
+            )
         else:
             seg_maps.append(
                 {
@@ -538,19 +542,35 @@ def get_google_earth_aligned_seg_maps(
     return seg_maps
 
 
-def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_level, debug):
+def get_ambiguous_seg_mask(voxel_id, est_seg_map):
+    seg_map = voxel_id.squeeze()[..., 0]
+    est_seg_map = np.array(est_seg_map.convert("P"))
+    return seg_map == est_seg_map
+
+
+def main(
+    osm_dir,
+    ges_dir,
+    seg_dir,
+    osm_out_dir,
+    ges_out_dir,
+    patch_size,
+    max_height,
+    zoom_level,
+    debug,
+):
     osm_files = sorted([f for f in os.listdir(osm_dir) if f.endswith(".osm")])
     tensor_extruder = TensorExtruder(max_height)
     for of in tqdm(osm_files):
         basename, _ = os.path.splitext(of)
         # Create folder for the OSM
-        _output_dir = os.path.join(output_dir, basename)
-        os.makedirs(_output_dir, exist_ok=True)
+        _osm_out_dir = os.path.join(osm_out_dir, basename)
+        os.makedirs(_osm_out_dir, exist_ok=True)
         # Rasterisation
-        output_hf_file_path = os.path.join(_output_dir, "hf.png")
-        output_ctr_file_path = os.path.join(_output_dir, "ctr.png")
-        output_seg_map_file_path = os.path.join(_output_dir, "seg.png")
-        metadata_file_path = os.path.join(_output_dir, "metadata.json")
+        output_hf_file_path = os.path.join(_osm_out_dir, "hf.png")
+        output_ctr_file_path = os.path.join(_osm_out_dir, "ctr.png")
+        output_seg_map_file_path = os.path.join(_osm_out_dir, "seg.png")
+        metadata_file_path = os.path.join(_osm_out_dir, "metadata.json")
         if (
             os.path.exists(output_hf_file_path)
             and os.path.exists(output_ctr_file_path)
@@ -565,7 +585,7 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
         else:
             height_field, seg_map, contours, metadata = get_osm_images(
                 os.path.join(osm_dir, of),
-                os.path.join(_output_dir, "tiles.png"),
+                os.path.join(_osm_out_dir, "tiles.png"),
                 zoom_level,
             )
             Image.fromarray(height_field).save(output_hf_file_path)
@@ -576,7 +596,7 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
 
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")
-        ge_projects = get_google_earth_projects(basename, google_earth_dir)
+        ge_projects = get_google_earth_projects(basename, ges_dir)
         if not ge_projects:
             logging.warning(
                 "No matching Google Earth Project found for OSM[File=%s]." % of
@@ -586,7 +606,7 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
         for gep in ge_projects:
             seg_maps = get_google_earth_aligned_seg_maps(
                 gep,
-                google_earth_dir,
+                ges_dir,
                 height_field,
                 contours,
                 seg_map,
@@ -594,18 +614,24 @@ def main(osm_dir, google_earth_dir, output_dir, patch_size, max_height, zoom_lev
                 metadata,
                 zoom_level,
                 tensor_extruder,
-                debug
+                debug,
             )
             # Generate the corresponding voxel raycasting maps
-            ges_seg_dir = os.path.join(google_earth_dir, gep, "raycasting")
-            os.makedirs(ges_seg_dir, exist_ok=True)
+            _ges_out_dir = ges_out_dir % gep
+            os.makedirs(_ges_out_dir, exist_ok=True)
             for idx, sg in enumerate(seg_maps):
                 if debug:
-                    sg.save(os.path.join(ges_seg_dir, "%s-%02d.jpg" % (gep, idx)))
+                    sg.save(os.path.join(_ges_out_dir, "%s-%02d.jpg" % (gep, idx)))
                 else:
                     with open(
-                        os.path.join(ges_seg_dir, "%s_%02d.pkl" % (gep, idx)), "wb"
+                        os.path.join(_ges_out_dir, "%s_%02d.pkl" % (gep, idx)), "wb"
                     ) as f:
+                        sg["mask"] = get_ambiguous_seg_mask(
+                            sg["voxel_id"],
+                            Image.open(
+                                os.path.join(seg_dir % gep, "%s_%02d.png" % (gep, idx))
+                            ),
+                        )
                         pickle.dump(sg, f)
 
 
@@ -620,7 +646,14 @@ if __name__ == "__main__":
     parser.add_argument("--osm_dir", default=os.path.join(PROJECT_HOME, "data", "xml"))
     parser.add_argument("--ges_dir", default=os.path.join(PROJECT_HOME, "data", "ges"))
     parser.add_argument(
-        "--output_dir", default=os.path.join(PROJECT_HOME, "data", "osm")
+        "--seg_dir", default=os.path.join(PROJECT_HOME, "data", "ges", "%s", "seg")
+    )
+    parser.add_argument(
+        "--osm_out_dir", default=os.path.join(PROJECT_HOME, "data", "osm")
+    )
+    parser.add_argument(
+        "--ges_out_dir",
+        default=os.path.join(PROJECT_HOME, "data", "ges", "%s", "raycasting"),
     )
     parser.add_argument("--patch_size", default=1536)
     parser.add_argument("--max_height", default=640)
@@ -630,7 +663,9 @@ if __name__ == "__main__":
     main(
         args.osm_dir,
         args.ges_dir,
-        args.output_dir,
+        args.seg_dir,
+        args.osm_out_dir,
+        args.ges_out_dir,
         args.patch_size,
         args.max_height,
         args.zoom,

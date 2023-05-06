@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-29 14:42:54
+# @Last Modified at: 2023-05-06 15:52:04
 # @Email:  root@haozhexie.com
 
 import logging
@@ -168,7 +168,6 @@ def train(cfg):
                         ["%.4f" % l for l in losses.val()],
                     )
                 )
-            break
 
         epoch_end_time = time()
         if utils.distributed.is_master():

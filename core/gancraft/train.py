@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-29 14:43:07
+# @Last Modified at: 2023-05-06 16:04:16
 # @Email:  root@haozhexie.com
 
 
@@ -122,9 +122,10 @@ def train(cfg):
             raydirs = utils.helpers.var_or_cuda(data["raydirs"], gancraft.device)
             cam_ori_t = utils.helpers.var_or_cuda(data["cam_ori_t"], gancraft.device)
             footage = utils.helpers.var_or_cuda(data["footage"], gancraft.device)
+            mask = utils.helpers.var_or_cuda(data["mask"], gancraft.device)
 
             fake_imgs = gancraft(hf_seg, voxel_id, depth2, raydirs, cam_ori_t)
-            loss = l1_loss(fake_imgs, footage)
+            loss = l1_loss(fake_imgs * mask, footage * mask)
             losses.update([loss.item()])
             gancraft.zero_grad()
             loss.backward()
