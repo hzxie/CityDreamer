@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-06 14:36:51
+# @Last Modified at: 2023-05-09 13:34:41
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -238,7 +238,6 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
     def _get_trajectories(self, cfg, split):
         trajectories = sorted(os.listdir(cfg.DATASETS.GOOGLE_EARTH.DIR))
         trajectories = trajectories[:-1] if split == "train" else trajectories[-1:]
-        trajectories = ["US-NewYork-1NewYorkPlaza-R813-A884"]
         files = [
             {
                 "hf": os.path.join(

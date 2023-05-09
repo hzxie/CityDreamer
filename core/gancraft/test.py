@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-29 12:37:15
+# @Last Modified at: 2023-05-09 13:15:20
 # @Email:  root@haozhexie.com
 
 import logging
@@ -65,7 +65,7 @@ def test(cfg, test_data_loader=None, gancraft=None):
             test_losses.update([loss.item()])
 
             if utils.distributed.is_master():
-                if idx < 3:
+                if idx % 15 == 0:
                     key_frames[
                         "GANCraft/Image/%04d" % idx
                     ] = utils.helpers.tensor_to_image(
