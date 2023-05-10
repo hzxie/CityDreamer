@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 16:13:25
+# @Last Modified at: 2023-05-10 21:35:01
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -26,7 +26,7 @@ cfg.DATASETS.OSM_LAYOUT.N_CLASSES                = 7
 cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT               = 640
 cfg.DATASETS.GOOGLE_EARTH                        = EasyDict()
 cfg.DATASETS.GOOGLE_EARTH.PIN_MEMORY             = ["hf", "seg"]
-cfg.DATASETS.GOOGLE_EARTH.N_REPEAT               = 2
+cfg.DATASETS.GOOGLE_EARTH.N_REPEAT               = 100
 cfg.DATASETS.GOOGLE_EARTH.N_VIEWS                = 60
 cfg.DATASETS.GOOGLE_EARTH.DIR                    = "./data/ges"
 cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
@@ -43,16 +43,16 @@ cfg.CONST.NETWORK                                = None
 # Directories
 #
 cfg.DIR                                          = EasyDict()
-cfg.DIR.OUTPUT                                   = './output'
+cfg.DIR.OUTPUT                                   = "./output"
 
 #
 # Memcached
 #
 cfg.MEMCACHED                                    = EasyDict()
 cfg.MEMCACHED.ENABLED                            = False
-cfg.MEMCACHED.LIBRARY_PATH                       = '/mnt/lustre/share/pymc/py3'
-cfg.MEMCACHED.SERVER_CONFIG                      = '/mnt/lustre/share/memcached_client/server_list.conf'
-cfg.MEMCACHED.CLIENT_CONFIG                      = '/mnt/lustre/share/memcached_client/client.conf'
+cfg.MEMCACHED.LIBRARY_PATH                       = "/mnt/lustre/share/pymc/py3"
+cfg.MEMCACHED.SERVER_CONFIG                      = "/mnt/lustre/share/memcached_client/server_list.conf"
+cfg.MEMCACHED.CLIENT_CONFIG                      = "/mnt/lustre/share/memcached_client/client.conf"
 
 #
 # WandB
@@ -139,7 +139,13 @@ cfg.TRAIN.GANCRAFT.LR                            = 1e-4
 cfg.TRAIN.GANCRAFT.EPS                           = 1e-7
 cfg.TRAIN.GANCRAFT.WEIGHT_DECAY                  = 0
 cfg.TRAIN.GANCRAFT.BETAS                         = (0., 0.999)
-cfg.TRAIN.GANCRAFT.CROP_SIZE                     = (256, 256)
+cfg.TRAIN.GANCRAFT.CROP_SIZE                     = (224, 224)
+cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_MODEL         = "vgg19"
+cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_LAYERS        = ["relu_3_1", "relu_4_1", "relu_5_1"]
+cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_WEIGHTS       = [0.125, 0.25, 1.0]
+cfg.TRAIN.GANCRAFT.REC_LOSS_FACTOR               = 10
+cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_FACTOR        = 10
+cfg.TRAIN.GANCRAFT.GAN_LOSS_FACTOR               = 0.5
 
 #
 # Test
