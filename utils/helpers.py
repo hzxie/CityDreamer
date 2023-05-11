@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-03 20:15:59
+# @Last Modified at: 2023-05-11 14:48:03
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -23,6 +23,11 @@ def var_or_cuda(x, device=None):
         else:
             x = x.cuda(device=device, non_blocking=True)
     return x
+
+
+def requires_grad(model, require=True):
+    for p in model.parameters():
+        p.requires_grad = require
 
 
 def static_vars(**kwargs):
@@ -77,6 +82,22 @@ def get_ins_seg_map(seg_map):
         seg_map_rgb[seg_map == i] = get_ins_seg_map.palatte[i]
 
     return Image.fromarray(seg_map_rgb)
+
+
+def masks_to_onehots(masks, n_class, ignored_classes=[]):
+    b, h, w = masks.shape
+    n_class_actual = n_class - len(ignored_classes)
+    one_hot_masks = torch.zeros(
+        (b, n_class_actual, h, w), dtype=torch.float32, device=masks.device
+    )
+
+    n_class_cnt = 0
+    for i in range(n_class):
+        if i not in ignored_classes:
+            one_hot_masks[:, n_class_cnt] = masks == i
+            n_class_cnt += 1
+
+    return one_hot_masks
 
 
 def mask_to_onehot(mask, n_class, ignored_classes=[]):

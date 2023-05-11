@@ -4,11 +4,12 @@
 # @Author: NVIDIA CORPORATION & AFFILIATES
 # @Date:   2023-05-10 20:08:17
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-10 20:44:33
+# @Last Modified at: 2023-05-11 15:00:17
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/NVlabs/imaginaire
 
 import torch
+import torch.nn.functional as F
 import torchvision
 
 import utils.distributed
@@ -40,6 +41,7 @@ class PerceptualLoss(torch.nn.Module):
         resize_mode="bilinear",
         num_scales=1,
         per_sample_weight=False,
+        device="cpu",
     ):
         super().__init__()
         if isinstance(layers, str):
@@ -60,9 +62,9 @@ class PerceptualLoss(torch.nn.Module):
             "the number of weights (%s)." % (len(layers), len(weights))
         )
         if network == "vgg19":
-            self.model = vgg19(layers)
+            self.model = vgg19(layers).to(device)
         elif network == "vgg16":
-            self.model = vgg16(layers)
+            self.model = vgg16(layers).to(device)
         else:
             raise ValueError("Network %s is not recognized" % network)
 
@@ -84,6 +86,76 @@ class PerceptualLoss(torch.nn.Module):
             self.criterion = torch.nn.MSELoss(reduction=reduction)
         else:
             raise ValueError("Criterion %s is not recognized" % criterion)
+
+    def _normalize(self, input):
+        r"""Normalize using ImageNet mean and std.
+
+        Args:
+            input (4D tensor NxCxHxW): The input images, assuming to be [-1, 1].
+
+        Returns:
+            Normalized inputs using the ImageNet normalization.
+        """
+        # normalize the input back to [0, 1]
+        normalized_input = (input + 1) / 2
+        # normalize the input using the ImageNet mean and std
+        mean = normalized_input.new_tensor([0.485, 0.456, 0.406]).view(1, 3, 1, 1)
+        std = normalized_input.new_tensor([0.229, 0.224, 0.225]).view(1, 3, 1, 1)
+        output = (normalized_input - mean) / std
+        return output
+
+    def forward(self, inp, target, per_sample_weights=None):
+        r"""Perceptual loss forward.
+
+        Args:
+           inp (4D tensor) : Input tensor.
+           target (4D tensor) : Ground truth tensor, same shape as the input.
+           per_sample_weight (bool): Output loss for individual samples in the
+            batch instead of mean loss.
+        Returns:
+           (scalar tensor) : The perceptual loss.
+        """
+        # Perceptual loss should operate in eval mode by default.
+        self.model.eval()
+        inp, target = self._normalize(inp), self._normalize(target)
+        if self.resize:
+            inp = F.interpolate(
+                inp, mode=self.resize_mode, size=(224, 224), align_corners=False
+            )
+            target = F.interpolate(
+                target, mode=self.resize_mode, size=(224, 224), align_corners=False
+            )
+
+        # Evaluate perceptual loss at each scale.
+        loss = 0
+        for scale in range(self.num_scales):
+            input_features, target_features = self.model(inp), self.model(target)
+
+            for layer, weight in zip(self.layers, self.weights):
+                l_tmp = self.criterion(
+                    input_features[layer], target_features[layer].detach()
+                )
+                if per_sample_weights is not None:
+                    l_tmp = l_tmp.mean(1).mean(1).mean(1)
+                loss += weight * l_tmp
+            # Downsample the input and target.
+            if scale != self.num_scales - 1:
+                inp = F.interpolate(
+                    inp,
+                    mode=self.resize_mode,
+                    scale_factor=0.5,
+                    align_corners=False,
+                    recompute_scale_factor=True,
+                )
+                target = F.interpolate(
+                    target,
+                    mode=self.resize_mode,
+                    scale_factor=0.5,
+                    align_corners=False,
+                    recompute_scale_factor=True,
+                )
+
+        return loss.float()
 
 
 class PerceptualNetwork(torch.nn.Module):

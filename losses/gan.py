@@ -4,7 +4,7 @@
 # @Author: NVIDIA CORPORATION & AFFILIATES
 # @Date:   2023-05-10 20:23:26
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-10 20:33:57
+# @Last Modified at: 2023-05-11 10:55:29
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/NVlabs/imaginaire
 
@@ -58,9 +58,8 @@ class GANLoss(torch.nn.Module):
         Args:
             input_x (tensor): Output values.
             t_real (boolean): Is this output value for real images.
-            reduce_dim (boolean): Whether we reduce the dimensions first. This makes a difference when we use
-            multi-resolution discriminators.
             weight (float): Weight to scale the loss value.
+            reduce_dim (boolean): Whether we reduce the dimensions first. This makes a difference when we use
             dis_update (boolean): Updating the discriminator or the generator.
         Returns:
             loss (tensor): Loss value.

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-10 21:35:01
+# @Last Modified at: 2023-05-11 15:05:27
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -26,7 +26,7 @@ cfg.DATASETS.OSM_LAYOUT.N_CLASSES                = 7
 cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT               = 640
 cfg.DATASETS.GOOGLE_EARTH                        = EasyDict()
 cfg.DATASETS.GOOGLE_EARTH.PIN_MEMORY             = ["hf", "seg"]
-cfg.DATASETS.GOOGLE_EARTH.N_REPEAT               = 100
+cfg.DATASETS.GOOGLE_EARTH.N_REPEAT               = 1
 cfg.DATASETS.GOOGLE_EARTH.N_VIEWS                = 60
 cfg.DATASETS.GOOGLE_EARTH.DIR                    = "./data/ges"
 cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
@@ -102,6 +102,7 @@ cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM           = 256
 cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM            = 256
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA        = 1
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR        = 64
+cfg.NETWORK.GANCRAFT.DIS_N_CHANNEL_BASE          = 128
 
 #
 # Train
@@ -135,7 +136,8 @@ cfg.TRAIN.GANCRAFT.DATASET                       = "GOOGLE_EARTH"
 cfg.TRAIN.GANCRAFT.N_EPOCHS                      = 500
 cfg.TRAIN.GANCRAFT.CKPT_SAVE_FREQ                = 25
 cfg.TRAIN.GANCRAFT.BATCH_SIZE                    = 1
-cfg.TRAIN.GANCRAFT.LR                            = 1e-4
+cfg.TRAIN.GANCRAFT.LR_GENERATOR                  = 1e-4
+cfg.TRAIN.GANCRAFT.LR_DISCRIMINATOR              = 4e-4
 cfg.TRAIN.GANCRAFT.EPS                           = 1e-7
 cfg.TRAIN.GANCRAFT.WEIGHT_DECAY                  = 0
 cfg.TRAIN.GANCRAFT.BETAS                         = (0., 0.999)
