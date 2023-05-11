@@ -65,11 +65,11 @@ def test(cfg, test_data_loader=None, gancraft=None):
             test_losses.update([loss.item()])
 
             if utils.distributed.is_master():
-                if idx % 15 == 0:
+                if idx % 3 == 0:
                     key_frames[
                         "GANCraft/Image/%04d" % idx
                     ] = utils.helpers.tensor_to_image(
-                        torch.cat([fake_imgs, footage], dim=3), "RGB"
+                        torch.cat([fake_imgs, footage], dim=2), "RGB"
                     )
                 logging.info(
                     "Test[%d/%d] Losses = %s"

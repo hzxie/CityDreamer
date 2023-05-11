@@ -286,8 +286,8 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                     {
                         "callback": "RandomCrop",
                         "parameters": {
-                            "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
-                            "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
+                            "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
+                            "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
                         },
                         "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
                     },
@@ -320,8 +320,8 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                     {
                         "callback": "CenterCrop",
                         "parameters": {
-                            "height": cfg.TEST.GANCRAFT.CROP_SIZE[0],
-                            "width": cfg.TEST.GANCRAFT.CROP_SIZE[1],
+                            "height": cfg.TEST.GANCRAFT.CROP_SIZE[1],
+                            "width": cfg.TEST.GANCRAFT.CROP_SIZE[0],
                         },
                         "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
                     },
