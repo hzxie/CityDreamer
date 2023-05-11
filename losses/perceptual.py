@@ -4,7 +4,7 @@
 # @Author: NVIDIA CORPORATION & AFFILIATES
 # @Date:   2023-05-10 20:08:17
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-11 15:00:17
+# @Last Modified at: 2023-05-11 15:31:08
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/NVlabs/imaginaire
 
@@ -51,12 +51,6 @@ class PerceptualLoss(torch.nn.Module):
         elif isinstance(layers, float) or isinstance(layers, int):
             weights = [weights]
 
-        if utils.distributed.is_local_master():
-            # Make sure only the first process in distributed training downloads
-            # the model, and the others will use the cache
-            # noinspection PyUnresolvedReferences
-            torch.distributed.barrier()
-
         assert len(layers) == len(weights), (
             "The number of layers (%s) must be equal to "
             "the number of weights (%s)." % (len(layers), len(weights))
@@ -67,12 +61,6 @@ class PerceptualLoss(torch.nn.Module):
             self.model = vgg16(layers).to(device)
         else:
             raise ValueError("Network %s is not recognized" % network)
-
-        if utils.distributed.is_local_master():
-            # Make sure only the first process in distributed training downloads
-            # the model, and the others will use the cache
-            # noinspection PyUnresolvedReferences
-            torch.distributed.barrier()
 
         self.num_scales = num_scales
         self.layers = layers

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-11 15:05:13
+# @Last Modified at: 2023-05-11 15:58:35
 # @Email:  root@haozhexie.com
 
 
@@ -64,14 +64,16 @@ def train(cfg):
         collate_fn=utils.datasets.collate_fn,
         pin_memory=False,
         sampler=train_sampler,
+        persistent_workers=True,
     )
     val_data_loader = torch.utils.data.DataLoader(
         dataset=val_dataset,
         batch_size=1,
         num_workers=cfg.CONST.N_WORKERS,
         collate_fn=utils.datasets.collate_fn,
-        pin_memory=True,
+        pin_memory=False,
         sampler=val_sampler,
+        persistent_workers=True,
     )
 
     # Set up optimizers
@@ -97,7 +99,7 @@ def train(cfg):
         cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_MODEL,
         cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_LAYERS,
         cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_WEIGHTS,
-        device=gancraft_g.device
+        device=gancraft_g.device,
     )
 
     # Load the pretrained model if exists
@@ -126,7 +128,15 @@ def train(cfg):
         batch_time = utils.average_meter.AverageMeter()
         data_time = utils.average_meter.AverageMeter()
         train_losses = utils.average_meter.AverageMeter(
-            ["L1Loss", "PerceptualLoss", "GANLoss", "GANLossFake", "GANLossReal", "GenLoss", "DisLoss"]
+            [
+                "L1Loss",
+                "PerceptualLoss",
+                "GANLoss",
+                "GANLossFake",
+                "GANLossReal",
+                "GenLoss",
+                "DisLoss",
+            ]
         )
         # Randomize the DistributedSampler
         if train_sampler:
@@ -136,6 +146,15 @@ def train(cfg):
         for batch_idx, data in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
             data_time.update(time() - batch_end_time)
+            # Warm up the discriminator
+            if n_itr <= cfg.TRAIN.GANCRAFT.DISCRIMINATOR_N_WARMUP_ITERS:
+                lr = (
+                    cfg.TRAIN.GANCRAFT.LR_DISCRIMINATOR
+                    * n_itr
+                    / cfg.TRAIN.GANCRAFT.DISCRIMINATOR_N_WARMUP_ITERS
+                )
+                for pg in optimizer_d.param_groups:
+                    pg["lr"] = lr
 
             hf_seg = utils.helpers.var_or_cuda(
                 torch.cat([data["hf"], data["seg"]], dim=1), gancraft_g.device

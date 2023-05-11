@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-11 15:05:27
+# @Last Modified at: 2023-05-11 16:22:52
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -36,7 +36,7 @@ cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
 #
 cfg.CONST                                        = EasyDict()
 cfg.CONST.EXP_NAME                               = ""
-cfg.CONST.N_WORKERS                              = 32
+cfg.CONST.N_WORKERS                              = 8
 cfg.CONST.NETWORK                                = None
 
 #
@@ -137,7 +137,8 @@ cfg.TRAIN.GANCRAFT.N_EPOCHS                      = 500
 cfg.TRAIN.GANCRAFT.CKPT_SAVE_FREQ                = 25
 cfg.TRAIN.GANCRAFT.BATCH_SIZE                    = 1
 cfg.TRAIN.GANCRAFT.LR_GENERATOR                  = 1e-4
-cfg.TRAIN.GANCRAFT.LR_DISCRIMINATOR              = 4e-4
+cfg.TRAIN.GANCRAFT.LR_DISCRIMINATOR              = 1e-5
+cfg.TRAIN.GANCRAFT.DISCRIMINATOR_N_WARMUP_ITERS  = 100000
 cfg.TRAIN.GANCRAFT.EPS                           = 1e-7
 cfg.TRAIN.GANCRAFT.WEIGHT_DECAY                  = 0
 cfg.TRAIN.GANCRAFT.BETAS                         = (0., 0.999)
