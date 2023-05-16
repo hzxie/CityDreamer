@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-11 14:48:03
+# @Last Modified at: 2023-05-16 12:18:10
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -78,7 +78,7 @@ def get_ins_seg_map_palette(legacy_palette):
 def get_ins_seg_map(seg_map):
     h, w = seg_map.shape
     seg_map_rgb = np.zeros((h, w, 3), dtype=np.uint8)
-    for i in range(np.max(seg_map)):
+    for i in range(np.max(seg_map) + 1):
         seg_map_rgb[seg_map == i] = get_ins_seg_map.palatte[i]
 
     return Image.fromarray(seg_map_rgb)
