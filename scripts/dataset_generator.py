@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-06 16:05:23
+# @Last Modified at: 2023-05-21 16:49:12
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -336,20 +336,34 @@ def _get_img_patch(img, cx, cy, patch_size):
     return img[h_s:h_e, x_s:x_e]
 
 
-def _get_instance_seg_map(part_seg_map, part_contours):
+def _get_instance_seg_map(part_seg_map, part_contours, patch_size):
     BULIDING_MASK_ID = 2
-    _, labels = cv2.connectedComponents(
+    BLD_INS_LABEL_MIN = 10
+    N_PIXELS_THRES = 16
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(
         (1 - part_contours).astype(np.uint8), connectivity=4
     )
     # Remove non-building instance masks
     labels[part_seg_map != BULIDING_MASK_ID] = 0
-    part_seg_map[part_seg_map == BULIDING_MASK_ID] = 0
+    # Remove too small buildings
+    ignored_indexes = np.where(stats[:, -1] <= N_PIXELS_THRES)[0]
+    labels[np.isin(labels, ignored_indexes)] = 0
     # Building instance mask
     building_mask = labels != 0
+
     # Building Instance Mask starts from 10 (labels + 10)
-    part_seg_map = part_seg_map * (1 - building_mask) + (labels + 10) * building_mask
+    part_seg_map[part_seg_map == BULIDING_MASK_ID] = 0
+    part_seg_map = (
+        part_seg_map * (1 - building_mask)
+        + (labels + BLD_INS_LABEL_MIN) * building_mask
+    )
     assert np.max(labels) < 2147483648
-    return part_seg_map.astype(np.int32)
+    # NOTE: assert stats.shape[1] == 5, represents x, y, w, h, area of the components.
+    # Convert x and y to dx and dy, where dx and dy denote the offsets to the center.
+    stats = stats.astype(np.float16)
+    stats[:, 0] -= patch_size // 2 + stats[:, 2] / 2
+    stats[:, 1] -= patch_size // 2 + stats[:, 3] / 2
+    return part_seg_map.astype(np.int32), stats[:, :2]
 
 
 def _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t):
@@ -442,8 +456,9 @@ def get_google_earth_aligned_seg_maps(
         tr_cy,
         patch_size,
     ).astype(np.int32)
-    # TODO: Instance segmentation for buildings
-    # part_seg_map = _get_instance_seg_map(part_seg_map, part_contours)
+    part_seg_map, bld_bboxes = _get_instance_seg_map(
+        part_seg_map, part_contours, patch_size
+    )
 
     # Build 3D Semantic Volume
     seg_volume = tensor_extruder(
@@ -539,11 +554,14 @@ def get_google_earth_aligned_seg_maps(
                 }
             )
 
-    return seg_maps
+    return seg_maps, bld_bboxes
 
 
 def get_ambiguous_seg_mask(voxel_id, est_seg_map):
+    BULIDING_MASK_ID = 2
+    BLD_INS_LABEL_MIN = 10
     seg_map = voxel_id.squeeze()[..., 0]
+    seg_map[seg_map >= BLD_INS_LABEL_MIN] = BULIDING_MASK_ID
     est_seg_map = np.array(est_seg_map.convert("P"))
     return seg_map == est_seg_map
 
@@ -604,7 +622,7 @@ def main(
             continue
         # Read Google Earth Studio metadata
         for gep in ge_projects:
-            seg_maps = get_google_earth_aligned_seg_maps(
+            seg_maps, bld_offsets = get_google_earth_aligned_seg_maps(
                 gep,
                 ges_dir,
                 height_field,
@@ -619,6 +637,7 @@ def main(
             # Generate the corresponding voxel raycasting maps
             _ges_out_dir = ges_out_dir % gep
             os.makedirs(_ges_out_dir, exist_ok=True)
+            np.save(os.path.join(_ges_out_dir, os.pardir, "%s.npy" % gep), bld_offsets)
             for idx, sg in enumerate(seg_maps):
                 if debug:
                     sg.save(os.path.join(_ges_out_dir, "%s-%02d.jpg" % (gep, idx)))
@@ -627,7 +646,7 @@ def main(
                         os.path.join(_ges_out_dir, "%s_%02d.pkl" % (gep, idx)), "wb"
                     ) as f:
                         sg["mask"] = get_ambiguous_seg_mask(
-                            sg["voxel_id"],
+                            sg["voxel_id"].copy(),
                             Image.open(
                                 os.path.join(seg_dir % gep, "%s_%02d.png" % (gep, idx))
                             ),

@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-11 14:49:23
+# @Last Modified at: 2023-05-22 20:14:23
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -30,7 +30,7 @@ class GanCraftGenerator(torch.nn.Module):
         self.render_net = RenderMLP(cfg)
         self.denoiser = RenderCNN(cfg)
 
-    def forward(self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t):
+    def forward(self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, offset=None):
         r"""GANcraft Generator forward.
 
         Args:
@@ -52,12 +52,14 @@ class GanCraftGenerator(torch.nn.Module):
             device=device,
         )
         net_out = self._forward_perpix(
-            global_features, voxel_id, depth2, raydirs, cam_ori_t, z
+            global_features, voxel_id, depth2, raydirs, cam_ori_t, z, offset
         )
         fake_images = self._forward_global(net_out, z)
         return fake_images
 
-    def _forward_perpix(self, global_features, voxel_id, depth2, raydirs, cam_ori_t, z):
+    def _forward_perpix(
+        self, global_features, voxel_id, depth2, raydirs, cam_ori_t, z, offset=None
+    ):
         r"""Sample points along rays, forwarding the per-point MLP and aggregate pixel features
 
         Args:
@@ -75,10 +77,10 @@ class GanCraftGenerator(torch.nn.Module):
 
         with torch.no_grad():
             # Random sample points along the ray
-            n_samples = self.cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY + 1
+            n_samples = self.cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY
             rand_depth, new_dists, new_idx = self._sample_depth_batched(
                 depth2,
-                n_samples,
+                n_samples + 1,
                 deterministic=False,
                 use_box_boundaries=False,
                 sample_depth=3,
@@ -88,10 +90,23 @@ class GanCraftGenerator(torch.nn.Module):
             inf_mask = torch.isinf(rand_depth)
             rand_depth[nan_mask | inf_mask] = 0.0
             worldcoord2 = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
+            # assert worldcoord2.shape[-1] == 3
+            if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+                assert offset is not None
+                # Make the building object-centric
+                center_offset = (
+                    self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE
+                    - self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
+                ) / 2
+                worldcoord2[..., 0] -= offset[:, 0] + center_offset
+                worldcoord2[..., 1] -= offset[:, 1] + center_offset
+                # Mask non-building rays
+                zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
+                worldcoord2[zero_rd_mask == 0] = 0
 
             # Generate per-sample segmentation label
             mc_masks = torch.gather(voxel_id, -2, new_idx)
-            # print(mc_masks.size())  # torch.Size([N, H, W, n_samples, 1])
+            # print(mc_masks.size())  # torch.Size([N, H, W, n_samples + 1, 1])
             mc_masks = mc_masks.long()
             mc_masks_onehot = torch.zeros(
                 [
@@ -104,7 +119,7 @@ class GanCraftGenerator(torch.nn.Module):
                 dtype=torch.float,
                 device=voxel_id.device,
             )
-            # print(mc_masks_onehot.size())  # torch.Size([N, H, W, n_samples, 1])
+            # print(mc_masks_onehot.size())  # torch.Size([N, H, W, n_samples + 1, 1])
             mc_masks_onehot.scatter_(-1, mc_masks, 1.0)
 
         net_out_s, net_out_c = self._forward_perpix_sub(
@@ -117,7 +132,7 @@ class GanCraftGenerator(torch.nn.Module):
         )
         # If a ray exclusively hits the sky (no intersection with the voxels), set its weight to zero.
         weights = weights * torch.logical_not(sky_only_mask).float()
-        # print(weights.size())   # torch.Size([N, H, W, n_samples, 1])
+        # print(weights.size())   # torch.Size([N, H, W, n_samples + 1, 1])
 
         rgbs = torch.clamp(net_out_c, -1, 1) + 1
         net_out = torch.sum(weights * rgbs, dim=-2, keepdim=True)
@@ -257,13 +272,25 @@ class GanCraftGenerator(torch.nn.Module):
             net_out_s (N x H x W x L x 1 tensor): Opacities.
             net_out_c (N x H x W x L x C5 tensor): Color embeddings.
         """
-        h, w, d = (
-            self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-            self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-            self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
-        )
+        if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+            h, w, d = (
+                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
+                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
+                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
+            )
+        else:
+            h, w, d = (
+                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
+            )
+
         delimeter = torch.tensor([h, w, d], device=worldcoord2.device)
+        assert (worldcoord2 / delimeter <= 1).all()
+        assert (worldcoord2 / delimeter >= 0).all()
+        # print(0, worldcoord2.shape)
         normalized_cord = worldcoord2 / delimeter * 2 - 1
+        # print(normalized_cord)
         # TODO: NAN VALUE FOUND!!
         # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))
         global_features = global_features[:, None, None, None, :].repeat(
@@ -273,8 +300,10 @@ class GanCraftGenerator(torch.nn.Module):
             normalized_cord.size(3),
             1,
         )
+        # print(1, global_features.shape, normalized_cord.shape)
         normalized_cord = torch.cat([normalized_cord, global_features], dim=-1)
         feature_in = self.grid_encoder(normalized_cord)
+        # print(2, normalized_cord.shape, feature_in.shape)
 
         net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot)
         return net_out_s, net_out_c

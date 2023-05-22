@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 #
-# @File:   data_loaders.py
+# @File:   datasets.py
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-09 13:34:41
+# @Last Modified at: 2023-05-22 20:14:52
 # @Email:  root@haozhexie.com
 
 import numpy as np
 import os
+import random
 import torch
 
 import utils.io
@@ -22,6 +23,8 @@ def get_dataset(cfg, dataset_name, split):
         return OsmLayoutDataset(cfg, split)
     elif dataset_name == "GOOGLE_EARTH":
         return GoogleEarthDataset(cfg, split)
+    elif dataset_name == "GOOGLE_EARTH_BUILDING":
+        return GoogleEarthBuildingDataset(cfg, split)
     else:
         raise Exception("Unknown dataset: %s" % dataset_name)
 
@@ -42,7 +45,7 @@ def collate_fn(batch):
 
 class OsmLayoutDataset(torch.utils.data.Dataset):
     def __init__(self, cfg, split):
-        super().__init__()
+        super(OsmLayoutDataset, self).__init__()
         self.cfg = cfg
         self.fields = [
             {"name": "hf", "callback": self.get_height_field},
@@ -175,7 +178,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
 
 class GoogleEarthDataset(torch.utils.data.Dataset):
     def __init__(self, cfg, split):
-        super().__init__()
+        super(GoogleEarthDataset, self).__init__()
         self.cfg = cfg
         self.split = split
         self.fields = ["hf", "seg", "footage", "raycasting"]
@@ -255,6 +258,11 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                     "raycasting",
                     "%s_%02d.pkl" % (t, i),
                 ),
+                "bld_offsets": os.path.join(
+                    cfg.DATASETS.GOOGLE_EARTH.DIR,
+                    t,
+                    "%s.npy" % t,
+                ),
             }
             for t in trajectories
             for i in range(cfg.DATASETS.GOOGLE_EARTH.N_VIEWS)
@@ -280,6 +288,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
         return (np.array(img) / 255.0 - 0.5) * 2
 
     def _get_data_transforms(self, cfg, split):
+        BULIDING_MASK_ID = 2
         if split == "train":
             return utils.data_transforms.Compose(
                 [
@@ -290,6 +299,15 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                             "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
                         },
                         "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
+                    },
+                    {
+                        "callback": "BuildingMaskRemap",
+                        "parameters": {
+                            "dst_value": BULIDING_MASK_ID,
+                            "rest_bld_seg_id": 0,
+                            "min_bld_ins_id": 10,
+                        },
+                        "objects": ["voxel_id", "seg"],
                     },
                     {
                         "callback": "ToOneHot",
@@ -322,6 +340,196 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                         "parameters": {
                             "height": cfg.TEST.GANCRAFT.CROP_SIZE[1],
                             "width": cfg.TEST.GANCRAFT.CROP_SIZE[0],
+                        },
+                        "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
+                    },
+                    {
+                        "callback": "BuildingMaskRemap",
+                        "parameters": {
+                            "dst_value": BULIDING_MASK_ID,
+                            "rest_bld_seg_id": 0,
+                            "min_bld_ins_id": 10,
+                        },
+                        "objects": ["voxel_id", "seg"],
+                    },
+                    {
+                        "callback": "ToOneHot",
+                        "parameters": {
+                            "n_classes": cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+                        },
+                        "objects": ["seg"],
+                    },
+                    {
+                        "callback": "ToTensor",
+                        "parameters": None,
+                        "objects": [
+                            "hf",
+                            "seg",
+                            "voxel_id",
+                            "depth2",
+                            "raydirs",
+                            "cam_ori_t",
+                            "footage",
+                            "mask",
+                        ],
+                    },
+                ]
+            )
+
+
+class GoogleEarthBuildingDataset(GoogleEarthDataset):
+    def __init__(self, cfg, split):
+        super(GoogleEarthBuildingDataset, self).__init__(cfg, split)
+        # Overwrite the transforms in GoogleEarthDataset
+        self.transforms = self._get_data_transforms(cfg, split)
+
+    def __len__(self):
+        return (
+            self.n_trajectories * self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_REPEAT
+            if self.split == "train"
+            else self.n_trajectories
+        )
+
+    def __getitem__(self, idx):
+        trajectory = self.trajectories[idx % self.n_trajectories]
+
+        data = {"footage": self._get_footage_img(trajectory["footage"])}
+        raycasting = utils.io.IO.get(trajectory["raycasting"])
+        bld_offsets = utils.io.IO.get(trajectory["bld_offsets"])
+        data["voxel_id"] = raycasting["voxel_id"]
+        data["depth2"] = raycasting["depth2"]
+        data["raydirs"] = raycasting["raydirs"]
+        data["cam_ori_t"] = raycasting["cam_ori_t"]
+        data["mask"] = raycasting["mask"]
+        # Determine Building Instances
+        data["bld_id"] = self._get_rnd_building_id(
+            data["voxel_id"][..., 0, 0], data["mask"]
+        )
+        # NOTE: data["offset"] -> (dy, dx)
+        data["offset"] = self._get_building_offset(bld_offsets, data["bld_id"])
+
+        data["hf"] = self._get_hf_seg(
+            "hf",
+            trajectory,
+            raycasting["img_center"]["cx"] + int(data["offset"][1]),
+            raycasting["img_center"]["cy"] + int(data["offset"][0]),
+        )
+        data["seg"] = self._get_hf_seg(
+            "seg",
+            trajectory,
+            raycasting["img_center"]["cx"] + int(data["offset"][1]),
+            raycasting["img_center"]["cy"] + int(data["offset"][0]),
+        )
+        data = self.transforms(data)
+        return data
+
+    def _get_rnd_building_id(self, voxel_id, seg_mask):
+        BLD_INS_LABEL_MIN = 10
+        # Make sure that the building contains unambiguous pixels
+        bld_id = -1
+        while bld_id == -1:
+            bld_id = random.choice(np.unique(voxel_id))
+            if (
+                bld_id <= BLD_INS_LABEL_MIN
+                or np.count_nonzero(seg_mask[voxel_id == bld_id]) == 0
+            ):
+                bld_id = -1
+
+        return bld_id
+
+    def _get_building_offset(self, bld_offsets, bld_id):
+        BLD_INS_LABEL_MIN = 10
+        assert bld_id > BLD_INS_LABEL_MIN, bld_id
+        # NOTE: 0 <= dx, dy < 1536, indicating the offsets between the building
+        # and the image center.
+        dx, dy = bld_offsets[bld_id - BLD_INS_LABEL_MIN]
+        return torch.Tensor([dy, dx])
+
+    def _get_data_transforms(self, cfg, split):
+        BULIDING_MASK_ID = 2
+        if split == "train":
+            return utils.data_transforms.Compose(
+                [
+                    {
+                        "callback": "BuildingMaskRemap",
+                        "parameters": {
+                            "src_attr": "bld_id",
+                            "dst_value": BULIDING_MASK_ID,
+                            "rest_bld_seg_id": 4,
+                            "min_bld_ins_id": 10,
+                        },
+                        "objects": ["voxel_id", "seg"],
+                    },
+                    {
+                        "callback": "MaskRaydirs",
+                        "parameters": {
+                            "src_attr": "raydirs",
+                            "target_value": BULIDING_MASK_ID,
+                        },
+                    },
+                    {
+                        "callback": "RemoveDataFields",
+                        "parameters": {
+                            "fields": ["bld_id"],
+                        },
+                    },
+                    {
+                        "callback": "RandomCropTarget",
+                        "parameters": {
+                            "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
+                            "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
+                            "target_value": BULIDING_MASK_ID,
+                        },
+                        "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
+                    },
+                    {
+                        "callback": "ToOneHot",
+                        "parameters": {
+                            "n_classes": cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+                        },
+                        "objects": ["seg"],
+                    },
+                    {
+                        "callback": "ToTensor",
+                        "parameters": None,
+                        "objects": [
+                            "hf",
+                            "seg",
+                            "voxel_id",
+                            "depth2",
+                            "raydirs",
+                            "cam_ori_t",
+                            "footage",
+                            "mask",
+                        ],
+                    },
+                ]
+            )
+        else:
+            return utils.data_transforms.Compose(
+                [
+                    {
+                        "callback": "BuildingMaskRemap",
+                        "parameters": {
+                            "src_attr": "bld_id",
+                            "dst_value": BULIDING_MASK_ID,
+                            "rest_bld_seg_id": 4,
+                            "min_bld_ins_id": 10,
+                        },
+                        "objects": ["voxel_id", "seg"],
+                    },
+                    {
+                        "callback": "RemoveDataFields",
+                        "parameters": {
+                            "fields": ["bld_id"],
+                        },
+                    },
+                    {
+                        "callback": "RandomCropTarget",
+                        "parameters": {
+                            "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
+                            "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
+                            "target_value": BULIDING_MASK_ID,
                         },
                         "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
                     },

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-11 15:58:35
+# @Last Modified at: 2023-05-22 19:33:42
 # @Email:  root@haozhexie.com
 
 
@@ -168,13 +168,16 @@ def train(cfg):
             seg_maps = utils.helpers.masks_to_onehots(
                 data["voxel_id"][..., 0, 0], cfg.DATASETS.OSM_LAYOUT.N_CLASSES
             )
+            offset = None if "offset" not in data else data["offset"]
 
             # Discriminator Update Step
             utils.helpers.requires_grad(gancraft_g, False)
             utils.helpers.requires_grad(gancraft_d, True)
 
             with torch.no_grad():
-                fake_imgs = gancraft_g(hf_seg, voxel_id, depth2, raydirs, cam_ori_t)
+                fake_imgs = gancraft_g(
+                    hf_seg, voxel_id, depth2, raydirs, cam_ori_t, offset
+                )
                 fake_imgs = fake_imgs.detach()
 
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
@@ -190,7 +193,7 @@ def train(cfg):
             utils.helpers.requires_grad(gancraft_d, False)
             utils.helpers.requires_grad(gancraft_g, True)
 
-            fake_imgs = gancraft_g(hf_seg, voxel_id, depth2, raydirs, cam_ori_t)
+            fake_imgs = gancraft_g(hf_seg, voxel_id, depth2, raydirs, cam_ori_t, offset)
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
             _l1_loss = l1_loss(fake_imgs * masks, footages * masks)
             _perceptual_loss = perceptual_loss(fake_imgs * masks, footages * masks)

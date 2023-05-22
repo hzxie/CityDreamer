@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2019-08-02 10:22:03
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-27 20:23:54
+# @Last Modified at: 2023-05-20 20:33:20
 # @Email:  root@haozhexie.com
 
 import io
@@ -44,6 +44,8 @@ class IO:
             return cls._read_img(file_path)
         if file_extension in [".pkl"]:
             return cls._read_pkl(file_path)
+        if file_extension in [".npy"]:
+            return cls._read_npy(file_path)
         else:
             raise Exception("Unsupported file extension: %s" % file_extension)
 
@@ -71,3 +73,23 @@ class IO:
             pkl = pickle.loads(buf)
 
         return pkl
+
+    # References: https://github.com/numpy/numpy/blob/master/numpy/lib/format.py
+    @classmethod
+    def _read_npy(cls, file_path):
+        if mc_client is None:
+            return np.load(file_path)
+        else:
+            pyvector = mc.pyvector()
+            mc_client.Get(file_path, pyvector)
+            buf = mc.ConvertBuffer(pyvector)
+            buf_bytes = buf.tobytes()
+            if not buf_bytes[:6] == b"\x93NUMPY":
+                raise Exception("Invalid npy file format.")
+
+            header_size = int.from_bytes(buf_bytes[8:10], byteorder="little")
+            header = eval(buf_bytes[10 : header_size + 10])
+            dtype = np.dtype(header["descr"])
+            return np.frombuffer(buf[header_size + 10 :], dtype).reshape(
+                header["shape"]
+            )

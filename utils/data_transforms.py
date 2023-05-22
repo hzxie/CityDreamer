@@ -4,9 +4,10 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 15:20:00
+# @Last Modified at: 2023-05-22 19:54:27
 # @Email:  root@haozhexie.com
 
+import cv2
 import numpy as np
 import random
 import torch
@@ -22,7 +23,9 @@ class Compose(object):
             parameters = tr["parameters"] if "parameters" in tr else None
             self.transformers.append(
                 {
-                    "callback": transformer(parameters, tr["objects"]),
+                    "callback": transformer(
+                        parameters, tr["objects"] if "objects" in tr else None
+                    ),
                 }
             )
 
@@ -118,10 +121,79 @@ class RandomCrop(object):
         h, w = img.shape[0], img.shape[1]
         offset_x = random.randint(0, w - self.width)
         offset_y = random.randint(0, h - self.height)
+        for k, v in data.items():
+            if k in self.objects:
+                data[k] = self._random_crop(v, offset_x, offset_y)
+
+        return data
+
+
+class RandomCropTarget(RandomCrop):
+    def __init__(self, parameters, objects):
+        super(RandomCropTarget, self).__init__(parameters, objects)
+        self.VOXEL_ID_KEY = "voxel_id"
+        self.target_value = parameters["target_value"]
+        self.objects = objects
+
+    def _get_target_bbox(self, voxel_id, target_value):
+        mask = voxel_id[..., 0, 0] == target_value
+        pts = cv2.findNonZero(mask.astype(np.uint8))
+        x_min, x_max = np.min(pts[..., 0]), np.max(pts[..., 0])
+        y_min, y_max = np.min(pts[..., 1]), np.max(pts[..., 1])
+        return (x_min, x_max), (y_min, y_max)
+
+    def __call__(self, data):
+        img = data[self.objects[0]]
+        h, w = img.shape[0], img.shape[1]
+        x, y = self._get_target_bbox(data[self.VOXEL_ID_KEY], self.target_value)
+        cx, cy = random.randint(x[0], x[1]), random.randint(y[0], y[1])
+        offset_x = min(max(0, cx - self.width // 2), w - self.width)
+        offset_y = min(max(0, cy - self.height // 2), h - self.height)
 
         for k, v in data.items():
             if k in self.objects:
                 data[k] = self._random_crop(v, offset_x, offset_y)
+        return data
+
+
+class BuildingMaskRemap(object):
+    def __init__(self, parameters, objects):
+        self.src_attr = parameters["src_attr"] if "src_attr" in parameters else None
+        self.dst_value = parameters["dst_value"]
+        self.rest_bld_seg_id = parameters["rest_bld_seg_id"]
+        self.min_bld_ins_id = parameters["min_bld_ins_id"]
+        self.objects = objects
+
+    def _building_mask_remap(self, seg_mask, src_value):
+        if src_value is not None:
+            # Preserve a certain building ID
+            # If this value is not specified, all buildings would be removed.
+            seg_mask[seg_mask == src_value] = self.dst_value
+
+        seg_mask[seg_mask >= self.min_bld_ins_id] = self.rest_bld_seg_id
+        return seg_mask
+
+    def __call__(self, data):
+        for k, v in data.items():
+            if k in self.objects:
+                src_value = data[self.src_attr] if self.src_attr in data else None
+                data[k] = self._building_mask_remap(v, src_value)
+
+        return data
+
+
+class MaskRaydirs(object):
+    def __init__(self, parameters, objects=None):
+        self.VOXEL_ID_KEY = "voxel_id"
+        self.src_attr = parameters["src_attr"]
+        self.target_value = parameters["target_value"]
+        self.objects = objects
+
+    def __call__(self, data):
+        for k, v in data.items():
+            if k == self.src_attr:
+                mask = data[self.VOXEL_ID_KEY][..., 0, 0] == self.target_value
+                data[k][mask] = 0
 
         return data
 
@@ -144,3 +216,17 @@ class ToOneHot(object):
                 data[k] = self._to_onehot(v)
 
         return data
+
+
+class RemoveDataFields(object):
+    def __init__(self, parameters, objects=None):
+        self.fields = parameters["fields"]
+        self.objects = objects
+
+    def __call__(self, data):
+        new_data = {}
+        for k, v in data.items():
+            if k not in self.fields:
+                new_data[k] = v
+
+        return new_data

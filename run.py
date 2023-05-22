@@ -4,11 +4,12 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 21:27:22
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-30 17:17:40
+# @Last Modified at: 2023-05-22 10:45:47
 # @Email:  root@haozhexie.com
 
 
 import argparse
+import cv2
 import importlib
 import logging
 import torch
@@ -22,6 +23,9 @@ import utils.distributed
 
 from pprint import pprint
 from datetime import datetime
+
+# Fix deadlock in DataLoader
+cv2.setNumThreads(0)
 
 
 def get_args_from_command_line():

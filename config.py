@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-11 16:22:52
+# @Last Modified at: 2023-05-22 20:14:39
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -30,6 +30,9 @@ cfg.DATASETS.GOOGLE_EARTH.N_REPEAT               = 1
 cfg.DATASETS.GOOGLE_EARTH.N_VIEWS                = 60
 cfg.DATASETS.GOOGLE_EARTH.DIR                    = "./data/ges"
 cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
+cfg.DATASETS.GOOGLE_EARTH_BUILDING               = EasyDict()
+cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_REPEAT      = 1
+cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE      = 670
 
 #
 # Constants
@@ -103,6 +106,7 @@ cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM            = 256
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA        = 1
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR        = 64
 cfg.NETWORK.GANCRAFT.DIS_N_CHANNEL_BASE          = 128
+cfg.NETWORK.GANCRAFT.BUILDING_MODE               = True
 
 #
 # Train
@@ -132,7 +136,7 @@ cfg.TRAIN.SAMPLER.WEIGHT_DECAY                   = 0
 cfg.TRAIN.SAMPLER.BETAS                          = (0.9, 0.999)
 # GANCraft
 cfg.TRAIN.GANCRAFT                               = EasyDict()
-cfg.TRAIN.GANCRAFT.DATASET                       = "GOOGLE_EARTH"
+cfg.TRAIN.GANCRAFT.DATASET                       = "GOOGLE_EARTH_BUILDING" if cfg.NETWORK.GANCRAFT.BUILDING_MODE else "GOOGLE_EARTH"
 cfg.TRAIN.GANCRAFT.N_EPOCHS                      = 500
 cfg.TRAIN.GANCRAFT.CKPT_SAVE_FREQ                = 25
 cfg.TRAIN.GANCRAFT.BATCH_SIZE                    = 1
@@ -160,6 +164,6 @@ cfg.TEST.SAMPLER                                 = EasyDict()
 cfg.TEST.SAMPLER.N_SAMPLES                       = 2
 cfg.TEST.SAMPLER.TEMPERATURES                    = [0.5, 1.0, 2.0]
 cfg.TEST.GANCRAFT                                = EasyDict()
-cfg.TEST.GANCRAFT.DATASET                        = "GOOGLE_EARTH"
+cfg.TEST.GANCRAFT.DATASET                        = "GOOGLE_EARTH_BUILDING" if cfg.NETWORK.GANCRAFT.BUILDING_MODE else "GOOGLE_EARTH"
 cfg.TEST.GANCRAFT.CROP_SIZE                      = (480, 270)
 # fmt: on
