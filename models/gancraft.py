@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 20:14:23
+# @Last Modified at: 2023-05-22 22:01:33
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -286,10 +286,13 @@ class GanCraftGenerator(torch.nn.Module):
             )
 
         delimeter = torch.tensor([h, w, d], device=worldcoord2.device)
-        assert (worldcoord2 / delimeter <= 1).all()
-        assert (worldcoord2 / delimeter >= 0).all()
         # print(0, worldcoord2.shape)
         normalized_cord = worldcoord2 / delimeter * 2 - 1
+        # TODO: Temporary fix
+        normalized_cord[normalized_cord > 1] = 1
+        normalized_cord[normalized_cord < -1] = -1
+        assert (normalized_cord <= 1).all()
+        assert (normalized_cord >= -1).all()
         # print(normalized_cord)
         # TODO: NAN VALUE FOUND!!
         # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))

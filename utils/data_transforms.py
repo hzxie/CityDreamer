@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 21:01:06
+# @Last Modified at: 2023-05-22 21:40:32
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -210,7 +210,7 @@ class MaskRaydirs(object):
     def __call__(self, data):
         for k, v in data.items():
             if k == self.src_attr:
-                mask = data[self.VOXEL_ID_KEY][..., 0, 0] == self.target_value
+                mask = data[self.VOXEL_ID_KEY][..., 0, 0] != self.target_value
                 data[k][mask] = 0
 
         return data

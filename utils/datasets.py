@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 21:15:40
+# @Last Modified at: 2023-05-22 22:00:40
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -240,6 +240,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
 
     def _get_trajectories(self, cfg, split):
         trajectories = sorted(os.listdir(cfg.DATASETS.GOOGLE_EARTH.DIR))
+        # trajectories = [t for t in trajectories if t.startswith("SG-Singapore")]
         trajectories = trajectories[:-1] if split == "train" else trajectories[-1:]
         files = [
             {
@@ -407,7 +408,6 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         )
         # NOTE: data["offset"] -> (dy, dx)
         data["offset"] = self._get_building_offset(bld_offsets, data["bld_id"])
-        assert data["offset"] is not None
 
         data["hf"] = self._get_hf_seg(
             "hf",
@@ -423,6 +423,21 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         )
         data = self.transforms(data)
         return data
+
+    def _get_hf_seg(self, field, trajectory, cx, cy):
+        if field in self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.PIN_MEMORY:
+            img = self.memcached[trajectory[field]]
+        elif field == "hf":
+            img = OsmLayoutDataset.get_height_field(trajectory[field], self.cfg)
+        elif field == "seg":
+            img = OsmLayoutDataset.get_seg_map(trajectory[field])
+        else:
+            raise Exception("Unknown field: %s" % field)
+
+        half_size = self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE // 2
+        tl_x, br_x = cx - half_size, cx + half_size
+        tl_y, br_y = cy - half_size, cy + half_size
+        return img[tl_y:br_y, tl_x:br_x]
 
     def _get_rnd_building_id(self, voxel_id, seg_mask):
         BLD_INS_LABEL_MIN = 10

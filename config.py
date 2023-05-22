@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 20:14:39
+# @Last Modified at: 2023-05-22 22:00:33
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -31,7 +31,8 @@ cfg.DATASETS.GOOGLE_EARTH.N_VIEWS                = 60
 cfg.DATASETS.GOOGLE_EARTH.DIR                    = "./data/ges"
 cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
 cfg.DATASETS.GOOGLE_EARTH_BUILDING               = EasyDict()
-cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_REPEAT      = 1
+cfg.DATASETS.GOOGLE_EARTH_BUILDING.PIN_MEMORY    = ["hf", "seg"]
+cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_REPEAT      = 25
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE      = 670
 
 #
