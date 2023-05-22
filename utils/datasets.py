@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 20:14:52
+# @Last Modified at: 2023-05-22 21:15:40
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -407,6 +407,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         )
         # NOTE: data["offset"] -> (dy, dx)
         data["offset"] = self._get_building_offset(bld_offsets, data["bld_id"])
+        assert data["offset"] is not None
 
         data["hf"] = self._get_hf_seg(
             "hf",
@@ -455,7 +456,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "parameters": {
                             "src_attr": "bld_id",
                             "dst_value": BULIDING_MASK_ID,
-                            "rest_bld_seg_id": 4,
+                            "rest_bld_seg_id": 0,
                             "min_bld_ins_id": 10,
                         },
                         "objects": ["voxel_id", "seg"],
@@ -513,7 +514,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "parameters": {
                             "src_attr": "bld_id",
                             "dst_value": BULIDING_MASK_ID,
-                            "rest_bld_seg_id": 4,
+                            "rest_bld_seg_id": 0,
                             "min_bld_ins_id": 10,
                         },
                         "objects": ["voxel_id", "seg"],
@@ -525,7 +526,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         },
                     },
                     {
-                        "callback": "RandomCropTarget",
+                        "callback": "CenterCropTarget",
                         "parameters": {
                             "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
                             "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],

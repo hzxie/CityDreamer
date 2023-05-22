@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 19:54:27
+# @Last Modified at: 2023-05-22 21:01:06
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -109,7 +109,7 @@ class RandomCrop(object):
         self.width = parameters["width"]
         self.objects = objects
 
-    def _random_crop(self, img, offset_x, offset_y):
+    def _crop(self, img, offset_x, offset_y):
         new_img = None
         new_img = img[
             offset_y : offset_y + self.height, offset_x : offset_x + self.width
@@ -123,7 +123,7 @@ class RandomCrop(object):
         offset_y = random.randint(0, h - self.height)
         for k, v in data.items():
             if k in self.objects:
-                data[k] = self._random_crop(v, offset_x, offset_y)
+                data[k] = self._crop(v, offset_x, offset_y)
 
         return data
 
@@ -152,7 +152,25 @@ class RandomCropTarget(RandomCrop):
 
         for k, v in data.items():
             if k in self.objects:
-                data[k] = self._random_crop(v, offset_x, offset_y)
+                data[k] = self._crop(v, offset_x, offset_y)
+        return data
+
+
+class CenterCropTarget(RandomCropTarget):
+    def __init__(self, parameters, objects):
+        super(CenterCropTarget, self).__init__(parameters, objects)
+
+    def __call__(self, data):
+        img = data[self.objects[0]]
+        h, w = img.shape[0], img.shape[1]
+        x, y = self._get_target_bbox(data[self.VOXEL_ID_KEY], self.target_value)
+        cx, cy = (x[0] + x[1]) // 2, (y[0] + y[1]) // 2
+        offset_x = min(max(0, cx - self.width // 2), w - self.width)
+        offset_y = min(max(0, cy - self.height // 2), h - self.height)
+
+        for k, v in data.items():
+            if k in self.objects:
+                data[k] = self._crop(v, offset_x, offset_y)
         return data
 
 
