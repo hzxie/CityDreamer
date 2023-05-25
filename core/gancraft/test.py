@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 20:27:21
+# @Last Modified at: 2023-05-25 15:01:54
 # @Email:  root@haozhexie.com
 
 import logging
@@ -59,18 +59,25 @@ def test(cfg, test_data_loader=None, gancraft=None):
             raydirs = utils.helpers.var_or_cuda(data["raydirs"], gancraft.device)
             cam_ori_t = utils.helpers.var_or_cuda(data["cam_ori_t"], gancraft.device)
             footage = utils.helpers.var_or_cuda(data["footage"], gancraft.device)
-            offset = None if "offset" not in data else data["offset"]
+            bld_stats = None if "bld_stats" not in data else data["bld_stats"]
 
-            fake_imgs = gancraft(hf_seg, voxel_id, depth2, raydirs, cam_ori_t, offset)
+            fake_imgs = gancraft(
+                hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bld_stats
+            )
             loss = l1_loss(fake_imgs, footage)
             test_losses.update([loss.item()])
 
             if utils.distributed.is_master():
-                if idx % 3 == 0:
+                if idx < 3:
+                    if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+                        masks = torch.zeros_like(data["mask"], device=gancraft.device)
+                        masks[voxel_id[:, None, ..., 0, 0] == 2] = 1
+                        footage = footage * masks
+
                     key_frames[
                         "GANCraft/Image/%04d" % idx
                     ] = utils.helpers.tensor_to_image(
-                        torch.cat([fake_imgs, footage], dim=2), "RGB"
+                        torch.cat([fake_imgs, footage], dim=3), "RGB"
                     )
                 logging.info(
                     "Test[%d/%d] Losses = %s"

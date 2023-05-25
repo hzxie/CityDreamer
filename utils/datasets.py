@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 22:00:40
+# @Last Modified at: 2023-05-25 15:33:33
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -240,7 +240,6 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
 
     def _get_trajectories(self, cfg, split):
         trajectories = sorted(os.listdir(cfg.DATASETS.GOOGLE_EARTH.DIR))
-        # trajectories = [t for t in trajectories if t.startswith("SG-Singapore")]
         trajectories = trajectories[:-1] if split == "train" else trajectories[-1:]
         files = [
             {
@@ -259,7 +258,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                     "raycasting",
                     "%s_%02d.pkl" % (t, i),
                 ),
-                "bld_offsets": os.path.join(
+                "bld_stats": os.path.join(
                     cfg.DATASETS.GOOGLE_EARTH.DIR,
                     t,
                     "%s.npy" % t,
@@ -381,6 +380,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
 class GoogleEarthBuildingDataset(GoogleEarthDataset):
     def __init__(self, cfg, split):
         super(GoogleEarthBuildingDataset, self).__init__(cfg, split)
+        self.split = split
         # Overwrite the transforms in GoogleEarthDataset
         self.transforms = self._get_data_transforms(cfg, split)
 
@@ -392,11 +392,19 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         )
 
     def __getitem__(self, idx):
-        trajectory = self.trajectories[idx % self.n_trajectories]
+        data = None
+        while data is None:
+            trajectory = self.trajectories[idx % self.n_trajectories]
+            data = self._get_data(trajectory)
+            idx += 1
 
+        return data
+
+    def _get_data(self, trajectory):
         data = {"footage": self._get_footage_img(trajectory["footage"])}
         raycasting = utils.io.IO.get(trajectory["raycasting"])
-        bld_offsets = utils.io.IO.get(trajectory["bld_offsets"])
+        bld_stats = utils.io.IO.get(trajectory["bld_stats"])
+        assert bld_stats is not None, trajectory
         data["voxel_id"] = raycasting["voxel_id"]
         data["depth2"] = raycasting["depth2"]
         data["raydirs"] = raycasting["raydirs"]
@@ -404,22 +412,26 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         data["mask"] = raycasting["mask"]
         # Determine Building Instances
         data["bld_id"] = self._get_rnd_building_id(
-            data["voxel_id"][..., 0, 0], data["mask"]
+            data["voxel_id"][..., 0, 0],
+            data["mask"],
+            True if self.split == "train" else False,
         )
-        # NOTE: data["offset"] -> (dy, dx)
-        data["offset"] = self._get_building_offset(bld_offsets, data["bld_id"])
+        if data["bld_id"] == -1:
+            return None
 
+        # NOTE: data["bld_stats"] -> (dy, dx, h, w)
+        data["bld_stats"] = self._get_building_stats(bld_stats, data["bld_id"])
         data["hf"] = self._get_hf_seg(
             "hf",
             trajectory,
-            raycasting["img_center"]["cx"] + int(data["offset"][1]),
-            raycasting["img_center"]["cy"] + int(data["offset"][0]),
+            raycasting["img_center"]["cx"] + int(data["bld_stats"][1]),
+            raycasting["img_center"]["cy"] + int(data["bld_stats"][0]),
         )
         data["seg"] = self._get_hf_seg(
             "seg",
             trajectory,
-            raycasting["img_center"]["cx"] + int(data["offset"][1]),
-            raycasting["img_center"]["cy"] + int(data["offset"][0]),
+            raycasting["img_center"]["cx"] + int(data["bld_stats"][1]),
+            raycasting["img_center"]["cy"] + int(data["bld_stats"][0]),
         )
         data = self.transforms(data)
         return data
@@ -439,27 +451,34 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         tl_y, br_y = cy - half_size, cy + half_size
         return img[tl_y:br_y, tl_x:br_x]
 
-    def _get_rnd_building_id(self, voxel_id, seg_mask):
+    def _get_rnd_building_id(self, voxel_id, seg_mask, rnd_mode=True, n_max_times=100):
         BLD_INS_LABEL_MIN = 10
+        N_MIN_PIXELS = 64
+
+        buliding_ids = np.unique(voxel_id[voxel_id > BLD_INS_LABEL_MIN])
+        n_bulidings = len(buliding_ids)
         # Make sure that the building contains unambiguous pixels
-        bld_id = -1
-        while bld_id == -1:
-            bld_id = random.choice(np.unique(voxel_id))
-            if (
-                bld_id <= BLD_INS_LABEL_MIN
-                or np.count_nonzero(seg_mask[voxel_id == bld_id]) == 0
-            ):
-                bld_id = -1
+        n_times = 0
+        bld_idx = n_bulidings // 2
+        while n_times < n_max_times:
+            if rnd_mode:
+                bld_idx = random.randint(0, n_bulidings - 1)
+            else:
+                bld_idx += 1
 
-        return bld_id
+            bld_id = buliding_ids[bld_idx % n_bulidings]
+            if np.count_nonzero(seg_mask[voxel_id == bld_id]) >= N_MIN_PIXELS:
+                break
 
-    def _get_building_offset(self, bld_offsets, bld_id):
+        return bld_id if n_times < n_max_times else None
+
+    def _get_building_stats(self, bld_stats, bld_id):
         BLD_INS_LABEL_MIN = 10
         assert bld_id > BLD_INS_LABEL_MIN, bld_id
         # NOTE: 0 <= dx, dy < 1536, indicating the offsets between the building
         # and the image center.
-        dx, dy = bld_offsets[bld_id - BLD_INS_LABEL_MIN]
-        return torch.Tensor([dy, dx])
+        dx, dy, w, h = bld_stats[bld_id - BLD_INS_LABEL_MIN]
+        return torch.Tensor([dy, dx, h, w])
 
     def _get_data_transforms(self, cfg, split):
         BULIDING_MASK_ID = 2

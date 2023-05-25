@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 22:01:33
+# @Last Modified at: 2023-05-25 15:39:59
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -25,12 +25,14 @@ class GanCraftGenerator(torch.nn.Module):
             in_channels=5,
             n_levels=cfg.NETWORK.GANCRAFT.GRID_N_LEVELS,
             lvl_channels=cfg.NETWORK.GANCRAFT.GRID_LEVEL_DIM,
-            desired_resolution=cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+            desired_resolution=cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
+            if cfg.NETWORK.GANCRAFT.BUILDING_MODE
+            else cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
         )
         self.render_net = RenderMLP(cfg)
         self.denoiser = RenderCNN(cfg)
 
-    def forward(self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, offset=None):
+    def forward(self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bld_stats=None):
         r"""GANcraft Generator forward.
 
         Args:
@@ -40,6 +42,7 @@ class GanCraftGenerator(torch.nn.Module):
             intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
             cam_ori_t (N x 3 tensor): Camera origins.
+            bld_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
         Returns:
             fake_images (N x 3 x H x W tensor): fake images
         """
@@ -52,13 +55,13 @@ class GanCraftGenerator(torch.nn.Module):
             device=device,
         )
         net_out = self._forward_perpix(
-            global_features, voxel_id, depth2, raydirs, cam_ori_t, z, offset
+            global_features, voxel_id, depth2, raydirs, cam_ori_t, z, bld_stats
         )
         fake_images = self._forward_global(net_out, z)
         return fake_images
 
     def _forward_perpix(
-        self, global_features, voxel_id, depth2, raydirs, cam_ori_t, z, offset=None
+        self, global_features, voxel_id, depth2, raydirs, cam_ori_t, z, bld_stats=None
     ):
         r"""Sample points along rays, forwarding the per-point MLP and aggregate pixel features
 
@@ -69,6 +72,7 @@ class GanCraftGenerator(torch.nn.Module):
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
             cam_ori_t (N x 3 tensor): Camera origins.
             z (N x C3 tensor): Intermediate style vectors.
+            bld_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
         """
         # Generate sky_mask; PE transform on ray direction.
         with torch.no_grad():
@@ -92,15 +96,15 @@ class GanCraftGenerator(torch.nn.Module):
             worldcoord2 = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
             # assert worldcoord2.shape[-1] == 3
             if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-                assert offset is not None
+                assert bld_stats is not None
                 # Make the building object-centric
                 center_offset = (
                     self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE
                     - self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
                 ) / 2
-                worldcoord2[..., 0] -= offset[:, 0] + center_offset
-                worldcoord2[..., 1] -= offset[:, 1] + center_offset
-                # Mask non-building rays
+                worldcoord2[..., 0] -= bld_stats[:, 0] + center_offset
+                worldcoord2[..., 1] -= bld_stats[:, 1] + center_offset
+                # TODO: Fix non-building rays
                 zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
                 worldcoord2[zero_rd_mask == 0] = 0
 
@@ -294,7 +298,6 @@ class GanCraftGenerator(torch.nn.Module):
         assert (normalized_cord <= 1).all()
         assert (normalized_cord >= -1).all()
         # print(normalized_cord)
-        # TODO: NAN VALUE FOUND!!
         # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))
         global_features = global_features[:, None, None, None, :].repeat(
             1,

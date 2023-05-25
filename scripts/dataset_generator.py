@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-21 16:49:12
+# @Last Modified at: 2023-05-25 10:59:17
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -336,13 +336,19 @@ def _get_img_patch(img, cx, cy, patch_size):
     return img[h_s:h_e, x_s:x_e]
 
 
-def _get_instance_seg_map(part_seg_map, part_contours, patch_size):
+def _get_instance_seg_map(part_seg_map, part_contours, patch_size, use_contours=False):
     BULIDING_MASK_ID = 2
     BLD_INS_LABEL_MIN = 10
     N_PIXELS_THRES = 16
-    _, labels, stats, _ = cv2.connectedComponentsWithStats(
-        (1 - part_contours).astype(np.uint8), connectivity=4
-    )
+    if use_contours:
+        _, labels, stats, _ = cv2.connectedComponentsWithStats(
+            (1 - part_contours).astype(np.uint8), connectivity=4
+        )
+    else:
+        _, labels, stats, _ = cv2.connectedComponentsWithStats(
+            (part_seg_map == BULIDING_MASK_ID).astype(np.uint8), connectivity=4
+        )
+
     # Remove non-building instance masks
     labels[part_seg_map != BULIDING_MASK_ID] = 0
     # Remove too small buildings
@@ -360,10 +366,10 @@ def _get_instance_seg_map(part_seg_map, part_contours, patch_size):
     assert np.max(labels) < 2147483648
     # NOTE: assert stats.shape[1] == 5, represents x, y, w, h, area of the components.
     # Convert x and y to dx and dy, where dx and dy denote the offsets to the center.
-    stats = stats.astype(np.float16)
+    stats = stats.astype(np.float32)
     stats[:, 0] -= patch_size // 2 + stats[:, 2] / 2
     stats[:, 1] -= patch_size // 2 + stats[:, 3] / 2
-    return part_seg_map.astype(np.int32), stats[:, :2]
+    return part_seg_map.astype(np.int32), stats[:, :4]
 
 
 def _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t):

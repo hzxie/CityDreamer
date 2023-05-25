@@ -4,13 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 19:33:42
+# @Last Modified at: 2023-05-25 15:38:58
 # @Email:  root@haozhexie.com
 
 
 import logging
 import os
 import torch
+import torch.nn.functional as F
 import shutil
 
 import core.gancraft.test
@@ -165,10 +166,15 @@ def train(cfg):
             cam_ori_t = utils.helpers.var_or_cuda(data["cam_ori_t"], gancraft_g.device)
             footages = utils.helpers.var_or_cuda(data["footage"], gancraft_g.device)
             masks = utils.helpers.var_or_cuda(data["mask"], gancraft_g.device)
+            if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+                masks[voxel_id[:, None, ..., 0, 0] != 2] = 0
+            else:
+                masks[voxel_id[:, None, ..., 0, 0] == 2] = 0
+
             seg_maps = utils.helpers.masks_to_onehots(
                 data["voxel_id"][..., 0, 0], cfg.DATASETS.OSM_LAYOUT.N_CLASSES
             )
-            offset = None if "offset" not in data else data["offset"]
+            bld_stats = None if "bld_stats" not in data else data["bld_stats"]
 
             # Discriminator Update Step
             utils.helpers.requires_grad(gancraft_g, False)
@@ -176,14 +182,19 @@ def train(cfg):
 
             with torch.no_grad():
                 fake_imgs = gancraft_g(
-                    hf_seg, voxel_id, depth2, raydirs, cam_ori_t, offset
+                    hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bld_stats
                 )
                 fake_imgs = fake_imgs.detach()
 
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
             real_labels = gancraft_d(footages, seg_maps, masks)
-            fake_loss = gan_loss(fake_labels, False, dis_update=True)
-            real_loss = gan_loss(real_labels, True, dis_update=True)
+
+            gan_loss_weights = None
+            if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+                gan_loss_weights = F.interpolate(masks, scale_factor=0.25)
+
+            fake_loss = gan_loss(fake_labels, False, gan_loss_weights, dis_update=True)
+            real_loss = gan_loss(real_labels, True, gan_loss_weights, dis_update=True)
             loss_d = fake_loss + real_loss
             gancraft_d.zero_grad()
             loss_d.backward()
@@ -193,11 +204,13 @@ def train(cfg):
             utils.helpers.requires_grad(gancraft_d, False)
             utils.helpers.requires_grad(gancraft_g, True)
 
-            fake_imgs = gancraft_g(hf_seg, voxel_id, depth2, raydirs, cam_ori_t, offset)
+            fake_imgs = gancraft_g(
+                hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bld_stats
+            )
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
             _l1_loss = l1_loss(fake_imgs * masks, footages * masks)
             _perceptual_loss = perceptual_loss(fake_imgs * masks, footages * masks)
-            _gan_loss = gan_loss(fake_labels, True, dis_update=False)
+            _gan_loss = gan_loss(fake_labels, True, gan_loss_weights, dis_update=False)
             loss_g = (
                 _l1_loss * cfg.TRAIN.GANCRAFT.REC_LOSS_FACTOR
                 + _perceptual_loss * cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_FACTOR
