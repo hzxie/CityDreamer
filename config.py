@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-25 15:42:19
+# @Last Modified at: 2023-05-26 15:56:42
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -18,7 +18,7 @@ cfg                                             = __C
 #
 cfg.DATASETS                                     = EasyDict()
 cfg.DATASETS.OSM_LAYOUT                          = EasyDict()
-cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY               = []
+cfg.DATASETS.OSM_LAYOUT.PIN_MEMORY               = ["hf", "seg"]
 cfg.DATASETS.OSM_LAYOUT.N_REPEAT                 = 250
 cfg.DATASETS.OSM_LAYOUT.DIR                      = "./data/osm"
 cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES          = [0]
@@ -75,8 +75,8 @@ cfg.WANDB.SYNC_TENSORBOARD                       = False
 cfg.NETWORK                                      = EasyDict()
 # VQGAN
 cfg.NETWORK.VQGAN                                = EasyDict()
-cfg.NETWORK.VQGAN.N_IN_CHANNELS                  = 8
-cfg.NETWORK.VQGAN.N_OUT_CHANNELS                 = 8
+cfg.NETWORK.VQGAN.N_IN_CHANNELS                  = 7
+cfg.NETWORK.VQGAN.N_OUT_CHANNELS                 = 7
 cfg.NETWORK.VQGAN.N_Z_CHANNELS                   = 512
 cfg.NETWORK.VQGAN.N_EMBED                        = 512
 cfg.NETWORK.VQGAN.EMBED_DIM                      = 512
@@ -116,9 +116,8 @@ cfg.TRAIN                                        = EasyDict()
 # VQGAN
 cfg.TRAIN.VQGAN                                  = EasyDict()
 cfg.TRAIN.VQGAN.DATASET                          = "OSM_LAYOUT"
-cfg.TRAIN.VQGAN.N_EPOCHS                         = 500
+cfg.TRAIN.VQGAN.N_EPOCHS                         = 1000
 cfg.TRAIN.VQGAN.REC_LOSS_FACTOR                  = 10
-cfg.TRAIN.VQGAN.CTR_LOSS_FACTOR                  = 2
 cfg.TRAIN.VQGAN.SEG_LOSS_FACTOR                  = 1
 cfg.TRAIN.VQGAN.CKPT_SAVE_FREQ                   = 25
 cfg.TRAIN.VQGAN.BATCH_SIZE                       = 2
@@ -128,7 +127,7 @@ cfg.TRAIN.VQGAN.BETAS                            = (0.5, 0.9)
 # Sampler
 cfg.TRAIN.SAMPLER                                = EasyDict()
 cfg.TRAIN.SAMPLER.DATASET                        = "OSM_LAYOUT"
-cfg.TRAIN.SAMPLER.N_EPOCHS                       = 500
+cfg.TRAIN.SAMPLER.N_EPOCHS                       = 1000
 cfg.TRAIN.SAMPLER.CKPT_SAVE_FREQ                 = 25
 cfg.TRAIN.SAMPLER.BATCH_SIZE                     = 10
 cfg.TRAIN.SAMPLER.N_WARMUP_ITERS                 = 7500

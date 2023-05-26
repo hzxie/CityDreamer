@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-28 15:00:25
+# @Last Modified at: 2023-05-26 15:53:50
 # @Email:  root@haozhexie.com
 
 import logging
@@ -83,18 +83,12 @@ def test(cfg, vqae=None, sampler=None):
                 torch.cat([pred[[0], 0], pred[[1], 0]], dim=2),
                 "HeightField",
             )
-            key_frames[
-                "Sampler/Image/T=%d/FootprintCtr" % t
-            ] = utils.helpers.tensor_to_image(
-                torch.cat([torch.sigmoid(pred[[0], 1]), pred[[1], 1]], dim=2),
-                "FootprintCtr",
-            )
             key_frames["Sampler/Image/T=%d/SegMap" % t] = utils.helpers.tensor_to_image(
                 utils.helpers.onehot_to_mask(
                     torch.cat(
                         [
-                            pred[[0], 2:],
-                            pred[[1], 2:],
+                            pred[[0], 1:],
+                            pred[[1], 1:],
                         ],
                         dim=3,
                     ),
