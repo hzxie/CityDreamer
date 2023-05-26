@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-25 15:33:33
+# @Last Modified at: 2023-05-26 10:50:18
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -416,7 +416,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
             data["mask"],
             True if self.split == "train" else False,
         )
-        if data["bld_id"] == -1:
+        if data["bld_id"] is None:
             return None
 
         # NOTE: data["bld_stats"] -> (dy, dx, h, w)
@@ -461,6 +461,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         n_times = 0
         bld_idx = n_bulidings // 2
         while n_times < n_max_times:
+            n_times += 1
             if rnd_mode:
                 bld_idx = random.randint(0, n_bulidings - 1)
             else:
