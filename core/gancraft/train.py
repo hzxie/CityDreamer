@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-25 15:38:58
+# @Last Modified at: 2023-05-27 15:35:32
 # @Email:  root@haozhexie.com
 
 
@@ -174,7 +174,9 @@ def train(cfg):
             seg_maps = utils.helpers.masks_to_onehots(
                 data["voxel_id"][..., 0, 0], cfg.DATASETS.OSM_LAYOUT.N_CLASSES
             )
-            bld_stats = None if "bld_stats" not in data else data["bld_stats"]
+            building_stats = (
+                None if "building_stats" not in data else data["building_stats"]
+            )
 
             # Discriminator Update Step
             utils.helpers.requires_grad(gancraft_g, False)
@@ -182,7 +184,7 @@ def train(cfg):
 
             with torch.no_grad():
                 fake_imgs = gancraft_g(
-                    hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bld_stats
+                    hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
                 )
                 fake_imgs = fake_imgs.detach()
 
@@ -205,7 +207,7 @@ def train(cfg):
             utils.helpers.requires_grad(gancraft_g, True)
 
             fake_imgs = gancraft_g(
-                hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bld_stats
+                hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
             )
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
             _l1_loss = l1_loss(fake_imgs * masks, footages * masks)

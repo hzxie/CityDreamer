@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-22 21:40:32
+# @Last Modified at: 2023-05-27 15:46:20
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -234,17 +234,3 @@ class ToOneHot(object):
                 data[k] = self._to_onehot(v)
 
         return data
-
-
-class RemoveDataFields(object):
-    def __init__(self, parameters, objects=None):
-        self.fields = parameters["fields"]
-        self.objects = objects
-
-    def __call__(self, data):
-        new_data = {}
-        for k, v in data.items():
-            if k not in self.fields:
-                new_data[k] = v
-
-        return new_data

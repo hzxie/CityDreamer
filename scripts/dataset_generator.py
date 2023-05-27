@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-26 10:49:47
+# @Last Modified at: 2023-05-27 17:18:27
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -336,21 +336,21 @@ def _get_img_patch(img, cx, cy, patch_size):
     return img[h_s:h_e, x_s:x_e]
 
 
-def _get_instance_seg_map(part_seg_map, part_contours, patch_size, use_contours=False):
+def _get_instance_seg_map(seg_map, contours, use_contours=False):
     BULIDING_MASK_ID = 2
     BLD_INS_LABEL_MIN = 10
     N_PIXELS_THRES = 16
     if use_contours:
         _, labels, stats, _ = cv2.connectedComponentsWithStats(
-            (1 - part_contours).astype(np.uint8), connectivity=4
+            (1 - contours).astype(np.uint8), connectivity=4
         )
     else:
         _, labels, stats, _ = cv2.connectedComponentsWithStats(
-            (part_seg_map == BULIDING_MASK_ID).astype(np.uint8), connectivity=4
+            (seg_map == BULIDING_MASK_ID).astype(np.uint8), connectivity=4
         )
 
     # Remove non-building instance masks
-    labels[part_seg_map != BULIDING_MASK_ID] = 0
+    labels[seg_map != BULIDING_MASK_ID] = 0
     # Remove too small buildings
     ignored_indexes = np.where(stats[:, -1] <= N_PIXELS_THRES)[0]
     # Set the label of small buildings to 6 (others)
@@ -359,18 +359,12 @@ def _get_instance_seg_map(part_seg_map, part_contours, patch_size, use_contours=
     building_mask = labels != 0
 
     # Building Instance Mask starts from 10 (labels + 10)
-    part_seg_map[part_seg_map == BULIDING_MASK_ID] = 0
-    part_seg_map = (
-        part_seg_map * (1 - building_mask)
-        + (labels + BLD_INS_LABEL_MIN) * building_mask
+    seg_map[seg_map == BULIDING_MASK_ID] = 0
+    seg_map = (
+        seg_map * (1 - building_mask) + (labels + BLD_INS_LABEL_MIN) * building_mask
     )
     assert np.max(labels) < 2147483648
-    # NOTE: assert stats.shape[1] == 5, represents x, y, w, h, area of the components.
-    # Convert x and y to dx and dy, where dx and dy denote the offsets to the center.
-    stats = stats.astype(np.float32)
-    stats[:, 0] -= patch_size // 2 + stats[:, 2] / 2
-    stats[:, 1] -= patch_size // 2 + stats[:, 3] / 2
-    return part_seg_map.astype(np.int32), stats[:, :4]
+    return seg_map.astype(np.int32), stats[:, :4]
 
 
 def _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t):
@@ -402,8 +396,8 @@ def get_google_earth_aligned_seg_maps(
     ge_project_name,
     google_earth_dir,
     height_field,
-    contours,
-    seg_map,
+    ins_seg_map,
+    building_stats,
     patch_size,
     metadata,
     zoom_level,
@@ -450,22 +444,23 @@ def get_google_earth_aligned_seg_maps(
     ).astype(np.int32)
     # Consider the elevation of the local area
     part_hf += ge_camera_poses["elevation"]
-
-    part_contours = _get_img_patch(
-        contours,
-        tr_cx,
-        tr_cy,
-        patch_size,
-    )
     part_seg_map = _get_img_patch(
-        seg_map,
+        ins_seg_map,
         tr_cx,
         tr_cy,
         patch_size,
     ).astype(np.int32)
-    part_seg_map, bld_bboxes = _get_instance_seg_map(
-        part_seg_map, part_contours, patch_size
-    )
+    # Recalculate the center offsets of buildings
+    BLD_INS_LABEL_MIN = 10
+    buildings = np.unique(part_seg_map[part_seg_map > BLD_INS_LABEL_MIN]) - BLD_INS_LABEL_MIN
+    part_building_stats = {}
+    for bid in buildings:
+        _stats = building_stats[bid].copy().astype(np.float32)
+        # NOTE: assert building_stats.shape[1] == 4, represents x, y, w, h of the components.
+        # Convert x and y to dx and dy, where dx and dy denote the offsets to the center.
+        _stats[0] = _stats[0] - tr_cx + _stats[2] / 2
+        _stats[1] = _stats[1] - tr_cy + _stats[3] / 2
+        part_building_stats[bid] = _stats
 
     # Build 3D Semantic Volume
     seg_volume = tensor_extruder(
@@ -561,7 +556,7 @@ def get_google_earth_aligned_seg_maps(
                 }
             )
 
-    return seg_maps, bld_bboxes
+    return seg_maps, part_building_stats
 
 
 def get_ambiguous_seg_mask(voxel_id, est_seg_map):
@@ -619,6 +614,9 @@ def main(
             with open(metadata_file_path, "w") as f:
                 json.dump(metadata, f)
 
+        # Generate building instance segmentation map and the corresponding metadata
+        ins_seg_map, building_stats = _get_instance_seg_map(seg_map, contours)
+        logging.info("%d building instances in %s" % (len(building_stats), basename))
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")
         ge_projects = get_google_earth_projects(basename, ges_dir)
@@ -629,12 +627,12 @@ def main(
             continue
         # Read Google Earth Studio metadata
         for gep in ge_projects:
-            seg_maps, bld_offsets = get_google_earth_aligned_seg_maps(
+            seg_maps, part_building_stats = get_google_earth_aligned_seg_maps(
                 gep,
                 ges_dir,
                 height_field,
-                contours,
-                seg_map,
+                ins_seg_map,
+                building_stats,
                 patch_size,
                 metadata,
                 zoom_level,
@@ -644,7 +642,8 @@ def main(
             # Generate the corresponding voxel raycasting maps
             _ges_out_dir = ges_out_dir % gep
             os.makedirs(_ges_out_dir, exist_ok=True)
-            np.save(os.path.join(_ges_out_dir, os.pardir, "%s.npy" % gep), bld_offsets)
+            with open(os.path.join(_ges_out_dir, os.pardir, "%s.pkl" % gep), "wb") as f:
+                pickle.dump(part_building_stats, f)
             for idx, sg in enumerate(seg_maps):
                 if debug:
                     sg.save(os.path.join(_ges_out_dir, "%s-%02d.jpg" % (gep, idx)))

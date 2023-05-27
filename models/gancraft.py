@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-25 15:39:59
+# @Last Modified at: 2023-05-27 18:30:11
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -32,7 +32,9 @@ class GanCraftGenerator(torch.nn.Module):
         self.render_net = RenderMLP(cfg)
         self.denoiser = RenderCNN(cfg)
 
-    def forward(self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bld_stats=None):
+    def forward(
+        self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None
+    ):
         r"""GANcraft Generator forward.
 
         Args:
@@ -42,7 +44,7 @@ class GanCraftGenerator(torch.nn.Module):
             intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
             cam_ori_t (N x 3 tensor): Camera origins.
-            bld_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
+            building_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
         Returns:
             fake_images (N x 3 x H x W tensor): fake images
         """
@@ -55,13 +57,20 @@ class GanCraftGenerator(torch.nn.Module):
             device=device,
         )
         net_out = self._forward_perpix(
-            global_features, voxel_id, depth2, raydirs, cam_ori_t, z, bld_stats
+            global_features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
         )
         fake_images = self._forward_global(net_out, z)
         return fake_images
 
     def _forward_perpix(
-        self, global_features, voxel_id, depth2, raydirs, cam_ori_t, z, bld_stats=None
+        self,
+        global_features,
+        voxel_id,
+        depth2,
+        raydirs,
+        cam_ori_t,
+        z,
+        building_stats=None,
     ):
         r"""Sample points along rays, forwarding the per-point MLP and aggregate pixel features
 
@@ -72,7 +81,7 @@ class GanCraftGenerator(torch.nn.Module):
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
             cam_ori_t (N x 3 tensor): Camera origins.
             z (N x C3 tensor): Intermediate style vectors.
-            bld_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
+            building_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
         """
         # Generate sky_mask; PE transform on ray direction.
         with torch.no_grad():
@@ -96,14 +105,14 @@ class GanCraftGenerator(torch.nn.Module):
             worldcoord2 = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
             # assert worldcoord2.shape[-1] == 3
             if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-                assert bld_stats is not None
+                assert building_stats is not None
                 # Make the building object-centric
                 center_offset = (
                     self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE
                     - self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
                 ) / 2
-                worldcoord2[..., 0] -= bld_stats[:, 0] + center_offset
-                worldcoord2[..., 1] -= bld_stats[:, 1] + center_offset
+                worldcoord2[..., 0] -= building_stats[:, 0] + center_offset
+                worldcoord2[..., 1] -= building_stats[:, 1] + center_offset
                 # TODO: Fix non-building rays
                 zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
                 worldcoord2[zero_rd_mask == 0] = 0
@@ -306,10 +315,8 @@ class GanCraftGenerator(torch.nn.Module):
             normalized_cord.size(3),
             1,
         )
-        # print(1, global_features.shape, normalized_cord.shape)
         normalized_cord = torch.cat([normalized_cord, global_features], dim=-1)
         feature_in = self.grid_encoder(normalized_cord)
-        # print(2, normalized_cord.shape, feature_in.shape)
 
         net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot)
         return net_out_s, net_out_c

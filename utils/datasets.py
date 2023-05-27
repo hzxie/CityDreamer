@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-26 15:49:38
+# @Last Modified at: 2023-05-27 17:18:19
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -38,7 +38,10 @@ def collate_fn(batch):
             data[k].append(v)
 
     for k, v in data.items():
-        data[k] = torch.stack(v, 0)
+        if type(v[0]) == torch.Tensor:
+            data[k] = torch.stack(v, 0)
+        else:
+            data[k] = v
 
     return data
 
@@ -237,6 +240,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
         trajectories = trajectories[:-1] if split == "train" else trajectories[-1:]
         files = [
             {
+                "name": t,
                 "hf": os.path.join(
                     cfg.DATASETS.OSM_LAYOUT.DIR, self._get_trajectory_city(t), "hf.png"
                 ),
@@ -252,10 +256,10 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                     "raycasting",
                     "%s_%02d.pkl" % (t, i),
                 ),
-                "bld_stats": os.path.join(
+                "building_stats": os.path.join(
                     cfg.DATASETS.GOOGLE_EARTH.DIR,
                     t,
-                    "%s.npy" % t,
+                    "%s.pkl" % t,
                 ),
             }
             for t in trajectories
@@ -397,35 +401,36 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
     def _get_data(self, trajectory):
         data = {"footage": self._get_footage_img(trajectory["footage"])}
         raycasting = utils.io.IO.get(trajectory["raycasting"])
-        bld_stats = utils.io.IO.get(trajectory["bld_stats"])
-        assert bld_stats is not None, trajectory
+        building_stats = utils.io.IO.get(trajectory["building_stats"])
         data["voxel_id"] = raycasting["voxel_id"]
         data["depth2"] = raycasting["depth2"]
         data["raydirs"] = raycasting["raydirs"]
         data["cam_ori_t"] = raycasting["cam_ori_t"]
         data["mask"] = raycasting["mask"]
         # Determine Building Instances
-        data["bld_id"] = self._get_rnd_building_id(
+        data["building_id"] = self._get_rnd_building_id(
             data["voxel_id"][..., 0, 0],
             data["mask"],
             True if self.split == "train" else False,
         )
-        if data["bld_id"] is None:
+        if data["building_id"] is None:
             return None
 
-        # NOTE: data["bld_stats"] -> (dy, dx, h, w)
-        data["bld_stats"] = self._get_building_stats(bld_stats, data["bld_id"])
+        # NOTE: data["building_stats"] -> (dy, dx, h, w)
+        data["building_stats"] = self._get_building_stats(
+            building_stats, data["building_id"]
+        )
         data["hf"] = self._get_hf_seg(
             "hf",
             trajectory,
-            raycasting["img_center"]["cx"] + int(data["bld_stats"][1]),
-            raycasting["img_center"]["cy"] + int(data["bld_stats"][0]),
+            raycasting["img_center"]["cx"] + int(data["building_stats"][1]),
+            raycasting["img_center"]["cy"] + int(data["building_stats"][0]),
         )
         data["seg"] = self._get_hf_seg(
             "seg",
             trajectory,
-            raycasting["img_center"]["cx"] + int(data["bld_stats"][1]),
-            raycasting["img_center"]["cy"] + int(data["bld_stats"][0]),
+            raycasting["img_center"]["cx"] + int(data["building_stats"][1]),
+            raycasting["img_center"]["cy"] + int(data["building_stats"][0]),
         )
         data = self.transforms(data)
         return data
@@ -461,18 +466,18 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
             else:
                 bld_idx += 1
 
-            bld_id = buliding_ids[bld_idx % n_bulidings]
-            if np.count_nonzero(seg_mask[voxel_id == bld_id]) >= N_MIN_PIXELS:
+            building_id = buliding_ids[bld_idx % n_bulidings]
+            if np.count_nonzero(seg_mask[voxel_id == building_id]) >= N_MIN_PIXELS:
                 break
 
-        return bld_id if n_times < n_max_times else None
+        return building_id if n_times < n_max_times else None
 
-    def _get_building_stats(self, bld_stats, bld_id):
+    def _get_building_stats(self, building_stats, building_id):
         BLD_INS_LABEL_MIN = 10
-        assert bld_id > BLD_INS_LABEL_MIN, bld_id
+        assert building_id > BLD_INS_LABEL_MIN
         # NOTE: 0 <= dx, dy < 1536, indicating the offsets between the building
         # and the image center.
-        dx, dy, w, h = bld_stats[bld_id - BLD_INS_LABEL_MIN]
+        dx, dy, w, h = building_stats[building_id - BLD_INS_LABEL_MIN]
         return torch.Tensor([dy, dx, h, w])
 
     def _get_data_transforms(self, cfg, split):
@@ -483,7 +488,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                     {
                         "callback": "BuildingMaskRemap",
                         "parameters": {
-                            "src_attr": "bld_id",
+                            "src_attr": "building_id",
                             "dst_value": BULIDING_MASK_ID,
                             "rest_bld_seg_id": 0,
                             "min_bld_ins_id": 10,
@@ -495,12 +500,6 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "parameters": {
                             "src_attr": "raydirs",
                             "target_value": BULIDING_MASK_ID,
-                        },
-                    },
-                    {
-                        "callback": "RemoveDataFields",
-                        "parameters": {
-                            "fields": ["bld_id"],
                         },
                     },
                     {
@@ -541,18 +540,12 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                     {
                         "callback": "BuildingMaskRemap",
                         "parameters": {
-                            "src_attr": "bld_id",
+                            "src_attr": "building_id",
                             "dst_value": BULIDING_MASK_ID,
                             "rest_bld_seg_id": 0,
                             "min_bld_ins_id": 10,
                         },
                         "objects": ["voxel_id", "seg"],
-                    },
-                    {
-                        "callback": "RemoveDataFields",
-                        "parameters": {
-                            "fields": ["bld_id"],
-                        },
                     },
                     {
                         "callback": "CenterCropTarget",
