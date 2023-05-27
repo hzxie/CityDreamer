@@ -448,7 +448,9 @@ def get_google_earth_aligned_seg_maps(
     ).astype(np.int32)
     # Recalculate the center offsets of buildings
     BLD_INS_LABEL_MIN = 10
-    buildings = np.unique(part_seg_map[part_seg_map > BLD_INS_LABEL_MIN]) - BLD_INS_LABEL_MIN
+    buildings = (
+        np.unique(part_seg_map[part_seg_map > BLD_INS_LABEL_MIN]) - BLD_INS_LABEL_MIN
+    )
     part_building_stats = {}
     for bid in buildings:
         _stats = building_stats[bid].copy().astype(np.float32)

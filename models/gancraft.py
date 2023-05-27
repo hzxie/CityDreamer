@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-27 18:30:11
+# @Last Modified at: 2023-05-27 21:34:10
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -31,6 +31,16 @@ class GanCraftGenerator(torch.nn.Module):
         )
         self.render_net = RenderMLP(cfg)
         self.denoiser = RenderCNN(cfg)
+        if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+            self.buildings = torch.nn.Parameter(
+                torch.randn(
+                    cfg.NETWORK.GANCRAFT.N_BUILDINGS,
+                    cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
+                ),
+                requires_grad=True,
+            )
+        else:
+            self.buildings = None
 
     def forward(
         self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None
@@ -44,23 +54,27 @@ class GanCraftGenerator(torch.nn.Module):
             intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
             cam_ori_t (N x 3 tensor): Camera origins.
-            building_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
+            building_stats (N x 5 tensor): The dy, dx, h, w, ID of the target building. (Only used in building mode)
         Returns:
             fake_images (N x 3 x H x W tensor): fake images
         """
         bs, device = hf_seg.size(0), hf_seg.device
         global_features = self.cond_hash_grid(hf_seg)
-        z = torch.randn(
-            bs,
-            self.cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            dtype=torch.float32,
-            device=device,
-        )
+        if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+            building_id = building_stats[:, -1].long()
+            z = self.buildings[building_id]
+        else:
+            z = torch.randn(
+                bs,
+                self.cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
+                dtype=torch.float32,
+                device=device,
+            )
         net_out = self._forward_perpix(
             global_features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
         )
         fake_images = self._forward_global(net_out, z)
-        return fake_images
+        return fake_images, self.buildings
 
     def _forward_perpix(
         self,

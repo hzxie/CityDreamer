@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-27 17:18:19
+# @Last Modified at: 2023-05-27 21:52:22
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -237,6 +237,11 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
 
     def _get_trajectories(self, cfg, split):
         trajectories = sorted(os.listdir(cfg.DATASETS.GOOGLE_EARTH.DIR))
+        trajectories = [
+            t
+            for t in trajectories
+            if t.startswith(cfg.DATASETS.GOOGLE_EARTH_BUILDING.CITY)
+        ]
         trajectories = trajectories[:-1] if split == "train" else trajectories[-1:]
         files = [
             {
@@ -478,7 +483,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         # NOTE: 0 <= dx, dy < 1536, indicating the offsets between the building
         # and the image center.
         dx, dy, w, h = building_stats[building_id - BLD_INS_LABEL_MIN]
-        return torch.Tensor([dy, dx, h, w])
+        return torch.Tensor([dy, dx, h, w, building_id])
 
     def _get_data_transforms(self, cfg, split):
         BULIDING_MASK_ID = 2
