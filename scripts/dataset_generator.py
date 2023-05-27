@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-27 17:18:27
+# @Last Modified at: 2023-05-27 19:15:08
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -351,10 +351,6 @@ def _get_instance_seg_map(seg_map, contours, use_contours=False):
 
     # Remove non-building instance masks
     labels[seg_map != BULIDING_MASK_ID] = 0
-    # Remove too small buildings
-    ignored_indexes = np.where(stats[:, -1] <= N_PIXELS_THRES)[0]
-    # Set the label of small buildings to 6 (others)
-    labels[np.isin(labels, ignored_indexes)] = 6
     # Building instance mask
     building_mask = labels != 0
 
@@ -631,7 +627,7 @@ def main(
                 gep,
                 ges_dir,
                 height_field,
-                ins_seg_map,
+                ins_seg_map.copy(),
                 building_stats,
                 patch_size,
                 metadata,
