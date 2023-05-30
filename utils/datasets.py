@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-27 21:52:22
+# @Last Modified at: 2023-05-30 10:21:26
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -237,11 +237,12 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
 
     def _get_trajectories(self, cfg, split):
         trajectories = sorted(os.listdir(cfg.DATASETS.GOOGLE_EARTH.DIR))
-        trajectories = [
-            t
-            for t in trajectories
-            if t.startswith(cfg.DATASETS.GOOGLE_EARTH_BUILDING.CITY)
-        ]
+        if cfg.DATASETS.GOOGLE_EARTH_BUILDING.CITY is not None:
+            trajectories = [
+                t
+                for t in trajectories
+                if t.startswith(cfg.DATASETS.GOOGLE_EARTH_BUILDING.CITY)
+            ]
         trajectories = trajectories[:-1] if split == "train" else trajectories[-1:]
         files = [
             {

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-27 21:51:21
+# @Last Modified at: 2023-05-30 10:17:10
 # @Email:  root@haozhexie.com
 
 
@@ -103,7 +103,6 @@ def train(cfg):
         cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_WEIGHTS,
         device=gancraft_g.device,
     )
-    kl_loss = losses.kl.GaussianKLLoss()
 
     # Load the pretrained model if exists
     init_epoch = 0
@@ -135,7 +134,6 @@ def train(cfg):
                 "L1Loss",
                 "PerceptualLoss",
                 "GANLoss",
-                "KLLoss",
                 "GANLossFake",
                 "GANLossReal",
                 "GenLoss",
@@ -186,7 +184,7 @@ def train(cfg):
             utils.helpers.requires_grad(gancraft_d, True)
 
             with torch.no_grad():
-                fake_imgs, _ = gancraft_g(
+                fake_imgs = gancraft_g(
                     hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
                 )
                 fake_imgs = fake_imgs.detach()
@@ -209,22 +207,17 @@ def train(cfg):
             utils.helpers.requires_grad(gancraft_d, False)
             utils.helpers.requires_grad(gancraft_g, True)
 
-            fake_imgs, buildings_z = gancraft_g(
+            fake_imgs = gancraft_g(
                 hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
             )
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
             _l1_loss = l1_loss(fake_imgs * masks, footages * masks)
             _perceptual_loss = perceptual_loss(fake_imgs * masks, footages * masks)
             _gan_loss = gan_loss(fake_labels, True, gan_loss_weights, dis_update=False)
-            _kl_loss = torch.tensor([0], device=gancraft_g.device)
-            if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-                _kl_loss = kl_loss(torch.mean(buildings_z))
-
             loss_g = (
                 _l1_loss * cfg.TRAIN.GANCRAFT.REC_LOSS_FACTOR
                 + _perceptual_loss * cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_FACTOR
                 + _gan_loss * cfg.TRAIN.GANCRAFT.GAN_LOSS_FACTOR
-                + _kl_loss * cfg.TRAIN.GANCRAFT.KL_LOSS_FACTOR
             )
             gancraft_g.zero_grad()
             loss_g.backward()
@@ -235,7 +228,6 @@ def train(cfg):
                     _l1_loss.item(),
                     _perceptual_loss.item(),
                     _gan_loss.item(),
-                    _kl_loss.item(),
                     fake_loss.item(),
                     real_loss.item(),
                     loss_g.item(),
@@ -250,11 +242,10 @@ def train(cfg):
                         "GANCraft/Loss/Batch/L1": train_losses.val(0),
                         "GANCraft/Loss/Batch/Perceptual": train_losses.val(1),
                         "GANCraft/Loss/Batch/GAN": train_losses.val(2),
-                        "GANCraft/Loss/Batch/KL": train_losses.val(3),
-                        "GANCraft/Loss/Batch/GANFake": train_losses.val(4),
-                        "GANCraft/Loss/Batch/GANReal": train_losses.val(5),
-                        "GANCraft/Loss/Batch/GenTotal": train_losses.val(6),
-                        "GANCraft/Loss/Batch/DisTotal": train_losses.val(7),
+                        "GANCraft/Loss/Batch/GANFake": train_losses.val(3),
+                        "GANCraft/Loss/Batch/GANReal": train_losses.val(4),
+                        "GANCraft/Loss/Batch/GenTotal": train_losses.val(5),
+                        "GANCraft/Loss/Batch/DisTotal": train_losses.val(6),
                     },
                     n_itr,
                 )
@@ -278,11 +269,10 @@ def train(cfg):
                     "GANCraft/Loss/Epoch/L1/Train": train_losses.avg(0),
                     "GANCraft/Loss/Epoch/Perceptual/Train": train_losses.avg(1),
                     "GANCraft/Loss/Epoch/GAN/Train": train_losses.avg(2),
-                    "GANCraft/Loss/Epoch/KL/Train": train_losses.avg(3),
-                    "GANCraft/Loss/Epoch/GANFake/Train": train_losses.avg(4),
-                    "GANCraft/Loss/Epoch/GANReal/Train": train_losses.avg(5),
-                    "GANCraft/Loss/Epoch/GenTotal/Train": train_losses.avg(6),
-                    "GANCraft/Loss/Epoch/DisTotal/Train": train_losses.avg(7),
+                    "GANCraft/Loss/Epoch/GANFake/Train": train_losses.avg(3),
+                    "GANCraft/Loss/Epoch/GANReal/Train": train_losses.avg(4),
+                    "GANCraft/Loss/Epoch/GenTotal/Train": train_losses.avg(5),
+                    "GANCraft/Loss/Epoch/DisTotal/Train": train_losses.avg(6),
                 },
                 epoch_idx,
             )

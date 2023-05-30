@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-27 21:34:10
+# @Last Modified at: 2023-05-30 10:15:45
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -31,16 +31,6 @@ class GanCraftGenerator(torch.nn.Module):
         )
         self.render_net = RenderMLP(cfg)
         self.denoiser = RenderCNN(cfg)
-        if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-            self.buildings = torch.nn.Parameter(
-                torch.randn(
-                    cfg.NETWORK.GANCRAFT.N_BUILDINGS,
-                    cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-                ),
-                requires_grad=True,
-            )
-        else:
-            self.buildings = None
 
     def forward(
         self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None
@@ -60,21 +50,17 @@ class GanCraftGenerator(torch.nn.Module):
         """
         bs, device = hf_seg.size(0), hf_seg.device
         global_features = self.cond_hash_grid(hf_seg)
-        if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-            building_id = building_stats[:, -1].long()
-            z = self.buildings[building_id]
-        else:
-            z = torch.randn(
-                bs,
-                self.cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-                dtype=torch.float32,
-                device=device,
-            )
+        z = torch.randn(
+            bs,
+            self.cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
+            dtype=torch.float32,
+            device=device,
+        )
         net_out = self._forward_perpix(
             global_features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
         )
         fake_images = self._forward_global(net_out, z)
-        return fake_images, self.buildings
+        return fake_images
 
     def _forward_perpix(
         self,

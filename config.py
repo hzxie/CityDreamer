@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-27 21:52:16
+# @Last Modified at: 2023-05-30 10:26:20
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -35,7 +35,6 @@ cfg.DATASETS.GOOGLE_EARTH_BUILDING.PIN_MEMORY    = ["hf", "seg"]
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_REPEAT      = 1
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE      = 672
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.CITY          = "US-NewYork"
-cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_BUILDINGS   = 19857
 
 #
 # Constants
@@ -110,7 +109,6 @@ cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA        = 1
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR        = 64
 cfg.NETWORK.GANCRAFT.DIS_N_CHANNEL_BASE          = 128
 cfg.NETWORK.GANCRAFT.BUILDING_MODE               = False
-cfg.NETWORK.GANCRAFT.N_BUILDINGS                 = cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_BUILDINGS
 
 #
 # Train
@@ -156,7 +154,6 @@ cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_WEIGHTS       = [0.125, 0.25, 1.0]
 cfg.TRAIN.GANCRAFT.REC_LOSS_FACTOR               = 10
 cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_FACTOR        = 10
 cfg.TRAIN.GANCRAFT.GAN_LOSS_FACTOR               = 0.5
-cfg.TRAIN.GANCRAFT.KL_LOSS_FACTOR                = 0.5
 
 #
 # Test
