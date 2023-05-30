@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-30 10:17:44
+# @Last Modified at: 2023-05-30 10:37:46
 # @Email:  root@haozhexie.com
 
 import logging
@@ -27,7 +27,10 @@ def test(cfg, test_data_loader=None, gancraft=None):
 
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
         checkpoint = torch.load(cfg.CONST.CKPT)
-        gancraft.load_state_dict(checkpoint["gancraft"])
+        if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+            gancraft.load_state_dict(checkpoint["gancraft_g_ema"])
+        else:
+            gancraft.load_state_dict(checkpoint["gancraft_g"])
 
     if test_data_loader is None:
         test_data_loader = torch.utils.data.DataLoader(

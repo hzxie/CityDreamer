@@ -4,10 +4,10 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-30 10:17:10
+# @Last Modified at: 2023-05-30 10:55:04
 # @Email:  root@haozhexie.com
 
-
+import copy
 import logging
 import os
 import torch
@@ -42,6 +42,8 @@ def train(cfg):
         gancraft_d = torch.nn.parallel.DistributedDataParallel(
             gancraft_d.to(local_rank), device_ids=[local_rank]
         )
+        if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+            gancraft_g_ema = copy.deepcopy(gancraft_g).requires_grad_(False).eval()
     else:
         gancraft_g.device = torch.device("cpu")
         gancraft_d.device = torch.device("cpu")
@@ -111,6 +113,8 @@ def train(cfg):
         checkpoint = torch.load(cfg.CONST.CKPT)
         gancraft_g.load_state_dict(checkpoint["gancraft_g"])
         gancraft_d.load_state_dict(checkpoint["gancraft_d"])
+        if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+            gancraft_g_ema.load_state_dict(checkpoint["gancraft_g_ema"])
         init_epoch = checkpoint["epoch_index"]
         logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
 
@@ -223,6 +227,22 @@ def train(cfg):
             loss_g.backward()
             optimizer_g.step()
 
+            # Update EMA
+            if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+                ema_n_itrs = cfg.TRAIN.GANCRAFT.EMA_N_RAMPUP_ITERS
+                if cfg.TRAIN.GANCRAFT.EMA_RAMPUP is not None:
+                    ema_n_itrs = min(ema_n_itrs, cfg.TRAIN.GANCRAFT.EMA_RAMPUP * n_itr)
+
+                ema_beta = 0.5 ** (
+                    cfg.TRAIN.GANCRAFT.BATCH_SIZE / max(ema_n_itrs, 1e-8)
+                )
+                for pg, p_gema in zip(
+                    gancraft_g.parameters(), gancraft_g_ema.parameters()
+                ):
+                    p_gema.copy_(pg.lerp(p_gema, ema_beta))
+                for bg, b_gema in zip(gancraft_g.buffers(), gancraft_g_ema.buffers()):
+                    b_gema.copy_(bg)
+
             train_losses.update(
                 [
                     _l1_loss.item(),
@@ -287,7 +307,11 @@ def train(cfg):
             )
 
         # Evaluate the current model
-        test_losses, key_frames = core.gancraft.test(cfg, val_data_loader, gancraft_g)
+        test_losses, key_frames = core.gancraft.test(
+            cfg,
+            val_data_loader,
+            gancraft_g_ema if cfg.TRAIN.GANCRAFT.ENABLE_EMA else gancraft_g,
+        )
         if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
@@ -298,13 +322,17 @@ def train(cfg):
             tb_writer.add_images(key_frames, epoch_idx)
             # Save ckeckpoints
             logging.info("Saved checkpoint to ckpt-last.pth ...")
+            ckpt = {
+                "cfg": cfg,
+                "epoch_index": epoch_idx,
+                "gancraft_g": gancraft_g.state_dict(),
+                "gancraft_d": gancraft_d.state_dict(),
+            }
+            if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+                ckpt["gancraft_g_ema"] = gancraft_g_ema.state_dict()
+
             torch.save(
-                {
-                    "cfg": cfg,
-                    "epoch_index": epoch_idx,
-                    "gancraft_g": gancraft_g.state_dict(),
-                    "gancraft_d": gancraft_d.state_dict(),
-                },
+                ckpt,
                 os.path.join(cfg.DIR.CHECKPOINTS, "ckpt-last.pth"),
             )
             if epoch_idx % cfg.TRAIN.GANCRAFT.CKPT_SAVE_FREQ == 0:

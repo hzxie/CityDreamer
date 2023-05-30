@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-30 10:26:20
+# @Last Modified at: 2023-05-30 10:55:37
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -154,6 +154,9 @@ cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_WEIGHTS       = [0.125, 0.25, 1.0]
 cfg.TRAIN.GANCRAFT.REC_LOSS_FACTOR               = 10
 cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_FACTOR        = 10
 cfg.TRAIN.GANCRAFT.GAN_LOSS_FACTOR               = 0.5
+cfg.TRAIN.GANCRAFT.ENABLE_EMA                    = True
+cfg.TRAIN.GANCRAFT.EMA_RAMPUP                    = 0.05
+cfg.TRAIN.GANCRAFT.EMA_N_RAMPUP_ITERS            = 10000
 
 #
 # Test
