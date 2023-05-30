@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-30 10:15:45
+# @Last Modified at: 2023-05-30 15:33:10
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -111,8 +111,11 @@ class GanCraftGenerator(torch.nn.Module):
                     self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE
                     - self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
                 ) / 2
-                worldcoord2[..., 0] -= building_stats[:, 0] + center_offset
-                worldcoord2[..., 1] -= building_stats[:, 1] + center_offset
+                building_stats = building_stats[:, None, None, None, :].repeat(
+                    1, worldcoord2.size(1), worldcoord2.size(2), worldcoord2.size(3), 1
+                )
+                worldcoord2[..., 0] -= building_stats[..., 0] + center_offset
+                worldcoord2[..., 1] -= building_stats[..., 1] + center_offset
                 # TODO: Fix non-building rays
                 zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
                 worldcoord2[zero_rd_mask == 0] = 0
@@ -961,5 +964,4 @@ class GanCraftDiscriminator(torch.nn.Module):
         # print(seg_maps.size())  # torch.Size([1, 7, H, W])
         # print(masks.size())  # torch.Size([1, 1, H, W])
         seg_maps = seg_maps * masks
-        seg_maps[:, 0] = masks * seg_maps[:, 0]
         return self._single_forward(images * masks, seg_maps)
