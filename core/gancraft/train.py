@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-30 10:55:04
+# @Last Modified at: 2023-05-31 11:34:22
 # @Email:  root@haozhexie.com
 
 import copy
@@ -37,12 +37,16 @@ def train(cfg):
     if torch.cuda.is_available():
         logging.info("Start running the DDP on rank %d." % local_rank)
         gancraft_g = torch.nn.parallel.DistributedDataParallel(
-            gancraft_g.to(local_rank), device_ids=[local_rank]
+            gancraft_g.to(local_rank),
+            device_ids=[local_rank],
+            find_unused_parameters=True,
         )
         gancraft_d = torch.nn.parallel.DistributedDataParallel(
-            gancraft_d.to(local_rank), device_ids=[local_rank]
+            gancraft_d.to(local_rank),
+            device_ids=[local_rank],
+            find_unused_parameters=True,
         )
-        if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+        if cfg.TRAIN.GANCRAFT.EMA_ENABLED:
             gancraft_g_ema = copy.deepcopy(gancraft_g).requires_grad_(False).eval()
     else:
         gancraft_g.device = torch.device("cpu")
@@ -113,7 +117,7 @@ def train(cfg):
         checkpoint = torch.load(cfg.CONST.CKPT)
         gancraft_g.load_state_dict(checkpoint["gancraft_g"])
         gancraft_d.load_state_dict(checkpoint["gancraft_d"])
-        if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+        if cfg.TRAIN.GANCRAFT.EMA_ENABLED:
             gancraft_g_ema.load_state_dict(checkpoint["gancraft_g_ema"])
         init_epoch = checkpoint["epoch_index"]
         logging.info("Recover completed. Current epoch = #%d" % (init_epoch,))
@@ -188,9 +192,10 @@ def train(cfg):
             utils.helpers.requires_grad(gancraft_d, True)
 
             with torch.no_grad():
-                fake_imgs = gancraft_g(
+                output = gancraft_g(
                     hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
                 )
+                fake_imgs = output["fake_images"]
                 fake_imgs = fake_imgs.detach()
 
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
@@ -207,13 +212,38 @@ def train(cfg):
             loss_d.backward()
             optimizer_d.step()
 
-            # Generate Update Step
+            # Discriminator Regularization
+            if (
+                cfg.TRAIN.GANCRAFT.DISCRIMINATOR_REG_ENABLED
+                and n_itr % cfg.TRAIN.GANCRAFT.DISCRIMINATOR_REG_INTERVAL == 0
+            ):
+                footages = footages.detach().requires_grad_(True)
+                real_labels = gancraft_d(footages, seg_maps, masks)
+                r1_grads = torch.autograd.grad(
+                    outputs=[real_labels["pred"].sum()],
+                    inputs=[footages],
+                    create_graph=True,
+                )
+                r1_grads = r1_grads[0]
+                r1_penalty = r1_grads.square().sum([1, 2, 3])
+                dr1_loss = (
+                    r1_penalty
+                    * cfg.TRAIN.GANCRAFT.DISCRIMINATOR_REG_R1_GAMMA
+                    / 2
+                    * cfg.TRAIN.GANCRAFT.DISCRIMINATOR_REG_INTERVAL
+                )
+                gancraft_d.zero_grad()
+                dr1_loss.backward()
+                optimizer_d.step()
+
+            # Generator Update Step
             utils.helpers.requires_grad(gancraft_d, False)
             utils.helpers.requires_grad(gancraft_g, True)
 
-            fake_imgs = gancraft_g(
+            output = gancraft_g(
                 hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
             )
+            fake_imgs = output["fake_images"]
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
             _l1_loss = l1_loss(fake_imgs * masks, footages * masks)
             _perceptual_loss = perceptual_loss(fake_imgs * masks, footages * masks)
@@ -227,8 +257,32 @@ def train(cfg):
             loss_g.backward()
             optimizer_g.step()
 
+            # Generator Regularization
+            if (
+                cfg.TRAIN.GANCRAFT.GENERATOR_REG_ENABLED
+                and n_itr % cfg.TRAIN.GANCRAFT.GENERATOR_REG_INTERVAL == 0
+            ):
+                output = gancraft_g(
+                    hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
+                )
+                reg_normalized_cord = (
+                    output["normalized_cord"]
+                    + torch.randn_like(output["normalized_cord"])
+                    * cfg.TRAIN.GANCRAFT.GENERATOR_REG_PERTURBED_DIST
+                )
+                sigma, _ = gancraft_g.module.forward_perpix_sub(
+                    output["global_features"],
+                    reg_normalized_cord,
+                    output["z"],
+                    output["masks_onehot"],
+                )
+                tv_loss = F.l1_loss(output["sigma"], sigma)
+                gancraft_g.zero_grad()
+                tv_loss.backward()
+                optimizer_g.step()
+
             # Update EMA
-            if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+            if cfg.TRAIN.GANCRAFT.EMA_ENABLED:
                 ema_n_itrs = cfg.TRAIN.GANCRAFT.EMA_N_RAMPUP_ITERS
                 if cfg.TRAIN.GANCRAFT.EMA_RAMPUP is not None:
                     ema_n_itrs = min(ema_n_itrs, cfg.TRAIN.GANCRAFT.EMA_RAMPUP * n_itr)
@@ -310,7 +364,7 @@ def train(cfg):
         test_losses, key_frames = core.gancraft.test(
             cfg,
             val_data_loader,
-            gancraft_g_ema if cfg.TRAIN.GANCRAFT.ENABLE_EMA else gancraft_g,
+            gancraft_g_ema if cfg.TRAIN.GANCRAFT.EMA_ENABLED else gancraft_g,
         )
         if utils.distributed.is_master():
             tb_writer.add_scalars(
@@ -328,7 +382,7 @@ def train(cfg):
                 "gancraft_g": gancraft_g.state_dict(),
                 "gancraft_d": gancraft_d.state_dict(),
             }
-            if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+            if cfg.TRAIN.GANCRAFT.EMA_ENABLED:
                 ckpt["gancraft_g_ema"] = gancraft_g_ema.state_dict()
 
             torch.save(

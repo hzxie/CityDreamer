@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-30 10:37:46
+# @Last Modified at: 2023-05-31 11:32:00
 # @Email:  root@haozhexie.com
 
 import logging
@@ -66,9 +66,10 @@ def test(cfg, test_data_loader=None, gancraft=None):
                 None if "building_stats" not in data else data["building_stats"]
             )
 
-            fake_imgs = gancraft(
+            output = gancraft(
                 hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
             )
+            fake_imgs = output["fake_images"]
             loss = l1_loss(fake_imgs, footage)
             test_losses.update([loss.item()])
 
