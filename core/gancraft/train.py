@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-31 11:34:22
+# @Last Modified at: 2023-05-31 11:35:59
 # @Email:  root@haozhexie.com
 
 import copy
@@ -114,7 +114,7 @@ def train(cfg):
     init_epoch = 0
     if "CKPT" in cfg.CONST:
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
-        checkpoint = torch.load(cfg.CONST.CKPT)
+        checkpoint = torch.load(cfg.CONST.CKPT, map_location=gancraft_g.device)
         gancraft_g.load_state_dict(checkpoint["gancraft_g"])
         gancraft_d.load_state_dict(checkpoint["gancraft_d"])
         if cfg.TRAIN.GANCRAFT.EMA_ENABLED:
