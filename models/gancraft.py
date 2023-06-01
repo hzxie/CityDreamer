@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-30 21:20:17
+# @Last Modified at: 2023-06-01 20:44:59
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -33,7 +33,7 @@ class GanCraftGenerator(torch.nn.Module):
         self.denoiser = RenderCNN(cfg)
 
     def forward(
-        self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None
+        self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None, z=None
     ):
         r"""GANcraft Generator forward.
 
@@ -50,12 +50,13 @@ class GanCraftGenerator(torch.nn.Module):
         """
         bs, device = hf_seg.size(0), hf_seg.device
         global_features = self.cond_hash_grid(hf_seg)
-        z = torch.randn(
-            bs,
-            self.cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            dtype=torch.float32,
-            device=device,
-        )
+        if z is None:
+            z = torch.randn(
+                bs,
+                self.cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
+                dtype=torch.float32,
+                device=device,
+            )
         normalized_cord, masks_onehot, new_dists = self._sample(
             voxel_id, depth2, raydirs, cam_ori_t, building_stats
         )

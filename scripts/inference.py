@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-01 20:37:22
+# @Last Modified at: 2023-06-01 21:53:16
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -18,6 +18,7 @@ import torch
 import sys
 
 from PIL import Image
+from tqdm import tqdm
 
 # Disable the warning message for PIL decompression bomb
 # Ref: https://stackoverflow.com/questions/25705773/image-cropping-tool-python
@@ -69,14 +70,13 @@ def get_instance_seg_map(seg_map):
 
 def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None):
     if city_osm_dir is not None:
-        hf = (
-            np.array(Image.open(os.path.join(city_osm_dir, "hf.png")))
-            / CONSTANTS["LAYOUT_MAX_HEIGHT"]
-        )
+        hf = np.array(Image.open(os.path.join(city_osm_dir, "hf.png")))
         seg = np.array(Image.open(os.path.join(city_osm_dir, "seg.png")).convert("P"))
     else:
         raise NotImplementedError
 
+    # Mapping constructions to buildings
+    seg[seg == 4] = 2
     # Generate building instance seg maps
     seg, building_stats = get_instance_seg_map(seg)
     return hf.astype(np.int32), seg.astype(np.int32), building_stats
@@ -146,7 +146,7 @@ def get_voxel_intersection_perspective(seg_volume, camera_location):
     )
 
 
-def render_bg(patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_ori_t):
+def render_bg(patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, z):
     _voxel_id = copy.deepcopy(voxel_id)
     _voxel_id[voxel_id >= CONSTANTS["BLD_INS_LABEL_MIN"]] = CONSTANTS[
         "BULIDING_MASK_ID"
@@ -171,10 +171,15 @@ def render_bg(patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_or
                 depth2[:, sy:ey, sx:ex],
                 raydirs[:, sy:ey, sx:ex],
                 cam_ori_t,
+                z,
             )
             bg_img[:, :, sy:ey, sx:ex] = output_bg["fake_images"]
 
     return bg_img
+
+
+def get_z(device):
+    return torch.randn(1, 256, dtype=torch.float32, device=device)
 
 
 def render_fg(
@@ -187,6 +192,7 @@ def render_fg(
     raydirs,
     cam_ori_t,
     building_stats,
+    building_z,
 ):
     _voxel_id = copy.deepcopy(voxel_id)
     _voxel_id[voxel_id != building_id] = 0
@@ -237,6 +243,7 @@ def render_fg(
                     _raydirs_part,
                     cam_ori_t,
                     torch.from_numpy(np.array(building_stats)).unsqueeze(dim=0),
+                    building_z,
                 )
                 mask = (voxel_id[:, sy:ey, sx:ex, 0, 0] == building_id).unsqueeze(dim=1)
                 fg_img[:, :, sy:ey, sx:ex] = output_fg["fake_images"] * mask
@@ -247,34 +254,22 @@ def render_fg(
 
 def render(
     patch_size,
-    part_hf,
-    part_seg,
+    seg_volume,
+    hf_seg,
     cam_pos,
     gancraft_bg,
     gancraft_fg,
     building_stats,
+    bg_z,
+    building_zs,
 ):
-    part_hf = torch.from_numpy(part_hf[None, None, ...]).to(gancraft_bg.output_device)
-    part_seg = torch.from_numpy(part_seg[None, None, ...]).to(gancraft_bg.output_device)
-    # print(part_seg.size())    # torch.Size([1, 1, 1536, 1536])
-    assert part_seg.size(1) == 1
-
-    seg_volume = get_seg_volume(part_hf, part_seg)
     voxel_id, depth2, raydirs, cam_ori_t = get_voxel_intersection_perspective(
         seg_volume, cam_pos
     )
-    # print(voxel_id.size())    # torch.Size([1, 540, 960, 6, 1])
-    part_seg = utils.helpers.masks_to_onehots(
-        part_seg[:, 0, :, :], CONSTANTS["LAYOUT_N_CLASSES"]
-    )
-    hf_seg = torch.cat([part_hf, part_seg], dim=1)
-    # print(part_seg.size())    # torch.Size([1, 7, 1536, 1536])
-    # print(hf_seg.size())      # torch.Size([1, 8, 1536, 1536])
-
     buildings = torch.unique(voxel_id[voxel_id > CONSTANTS["BLD_INS_LABEL_MIN"]])
     with torch.no_grad():
         bg_img = render_bg(
-            patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_ori_t
+            patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bg_z
         )
         for b in buildings:
             fg_img, fg_mask = render_fg(
@@ -287,14 +282,20 @@ def render(
                 raydirs,
                 cam_ori_t,
                 building_stats[b.item()],
+                building_zs[b.item()],
             )
-            bg_img = bg_img * (1 - fg_mask) + fg_img * bg_img
-    
+            bg_img = bg_img * (1 - fg_mask) + fg_img * fg_mask
+
     return bg_img
 
 
 def main(
-    patch_size, gancraft_bg_ckpt, gancraft_fg_ckpt, sampler_ckpt=None, city_osm_dir=None
+    patch_size,
+    output_file,
+    gancraft_bg_ckpt,
+    gancraft_fg_ckpt,
+    sampler_ckpt=None,
+    city_osm_dir=None,
 ):
     # Load checkpoints
     logging.info("Loading checkpoints ...")
@@ -323,9 +324,18 @@ def main(
     assert hf.shape == seg.shape
     logging.info("City Layout Patch Size (HxW): %s" % (hf.shape,))
 
-    # Generate local image patch of the height field and seg map
+    # Generate latent codes
+    logging.info("Generating latent codes ...")
+    bg_z = get_z(gancraft_bg.output_device)
+    building_zs = {
+        i + CONSTANTS["BLD_INS_LABEL_MIN"]: get_z(gancraft_bg.output_device)
+        for i in range(len(building_stats))
+    }
+
     # TODO: Replace the center crop here
     cy, cx = seg.shape[0] // 2, seg.shape[1] // 2
+
+    # Generate local image patch of the height field and seg map
     part_hf = get_image_patch(hf, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
     part_seg = get_image_patch(seg, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
     assert part_hf.shape == (CONSTANTS["LAYOUT_VOL_SIZE"], CONSTANTS["LAYOUT_VOL_SIZE"])
@@ -341,19 +351,51 @@ def main(
             building_stats[_b, 0] - cx + building_stats[_b, 2] / 2,
         ]
 
-    # TODO: Generate camera trajectories
-    cam_pos = {"x": 767, "y": 517, "z": 395}
-    img = render(
-        patch_size,
-        part_hf,
-        part_seg,
-        cam_pos,
-        gancraft_bg,
-        gancraft_fg,
-        _building_stats,
+    # Build seg_volume
+    logging.info("Generating seg volume ...")
+    part_hf = torch.from_numpy(part_hf[None, None, ...]).to(gancraft_bg.output_device)
+    part_seg = torch.from_numpy(part_seg[None, None, ...]).to(gancraft_bg.output_device)
+    # print(part_seg.size())    # torch.Size([1, 1, 1536, 1536])
+    assert part_seg.size(1) == 1
+
+    seg_volume = get_seg_volume(part_hf, part_seg)
+    part_hf = part_hf / CONSTANTS["LAYOUT_MAX_HEIGHT"]
+    part_seg = utils.helpers.masks_to_onehots(
+        part_seg[:, 0, :, :], CONSTANTS["LAYOUT_N_CLASSES"]
     )
-    plt.imshow(utils.helpers.tensor_to_image(img, "RGB"))
-    plt.savefig("output/test.jpg")
+    hf_seg = torch.cat([part_hf, part_seg], dim=1)
+    # print(hf_seg.size())      # torch.Size([1, 8, 1536, 1536])
+
+    # TODO: Generate camera trajectories
+    logging.info("Generating camera poses ...")
+    cam_pos = [{"x": 767, "y": y, "z": 395} for y in range(917, 117, -20)]
+
+    logging.info("Rendering videos ...")
+    video = cv2.VideoWriter(
+        output_file,
+        cv2.VideoWriter_fourcc(*"mp4v"),
+        4,
+        (CONSTANTS["GES_IMAGE_WIDTH"], CONSTANTS["GES_IMAGE_HEIGHT"]),
+    )
+    for cp in tqdm(cam_pos):
+        try:
+            img = render(
+                patch_size,
+                seg_volume,
+                hf_seg,
+                cp,
+                gancraft_bg,
+                gancraft_fg,
+                _building_stats,
+                bg_z,
+                building_zs,
+            )
+            img = (utils.helpers.tensor_to_image(img, "RGB") * 255).astype(np.uint8)
+            video.write(img[..., ::-1])
+        except Exception as ex:
+            logging.exception(ex)
+
+    video.release()
 
 
 if __name__ == "__main__":
@@ -389,10 +431,16 @@ if __name__ == "__main__":
         default=CONSTANTS["GES_IMAGE_WIDTH"] // 3,
         type=int,
     )
+    parser.add_argument(
+        "--output_file",
+        default=os.path.join(PROJECT_HOME, "output", "rendering.mp4"),
+        type=str,
+    )
     args = parser.parse_args()
 
     main(
         (args.patch_height, args.patch_width),
+        args.output_file,
         args.gancraft_bg_ckpt,
         args.gancraft_fg_ckpt,
         args.sampler_ckpt,
