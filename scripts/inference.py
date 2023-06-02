@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-01 21:53:16
+# @Last Modified at: 2023-06-02 11:15:45
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -44,6 +44,7 @@ CONSTANTS = {
     "GES_VFOV": 20,
     "GES_IMAGE_HEIGHT": 540,
     "GES_IMAGE_WIDTH": 960,
+    "IMAGE_PADDING": 8,
     "N_VOXEL_INTERSECT_SAMPLES": 6,
 }
 
@@ -146,6 +147,38 @@ def get_voxel_intersection_perspective(seg_volume, camera_location):
     )
 
 
+def get_z(device):
+    return torch.randn(1, 256, dtype=torch.float32, device=device)
+
+
+def get_pad_img_bbox(sx, ex, sy, ey):
+    psx = sx - CONSTANTS["IMAGE_PADDING"] if sx != 0 else 0
+    psy = sy - CONSTANTS["IMAGE_PADDING"] if sy != 0 else 0
+    pex = (
+        ex + CONSTANTS["IMAGE_PADDING"]
+        if ex != CONSTANTS["GES_IMAGE_WIDTH"]
+        else CONSTANTS["GES_IMAGE_WIDTH"]
+    )
+    pey = (
+        ey + CONSTANTS["IMAGE_PADDING"]
+        if ey != CONSTANTS["GES_IMAGE_HEIGHT"]
+        else CONSTANTS["GES_IMAGE_HEIGHT"]
+    )
+    return psx, pex, psy, pey
+
+
+def get_img_without_pad(img, sx, ex, sy, ey, psx, pex, psy, pey):
+    if CONSTANTS["IMAGE_PADDING"] == 0:
+        return img
+
+    return img[
+        :,
+        :,
+        sy - psy : ey - pey if ey != pey else ey,
+        sx - psx : ex - pex if ex != pex else ex,
+    ]
+
+
 def render_bg(patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, z):
     _voxel_id = copy.deepcopy(voxel_id)
     _voxel_id[voxel_id >= CONSTANTS["BLD_INS_LABEL_MIN"]] = CONSTANTS[
@@ -165,21 +198,20 @@ def render_bg(patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_or
         for j in range(CONSTANTS["GES_IMAGE_WIDTH"] // patch_size[1]):
             sy, sx = i * patch_size[0], j * patch_size[1]
             ey, ex = sy + patch_size[0], sx + patch_size[1]
+            psx, pex, psy, pey = get_pad_img_bbox(sx, ex, sy, ey)
             output_bg = gancraft_bg(
                 hf_seg,
-                _voxel_id[:, sy:ey, sx:ex],
-                depth2[:, sy:ey, sx:ex],
-                raydirs[:, sy:ey, sx:ex],
+                _voxel_id[:, psy:pey, psx:pex],
+                depth2[:, psy:pey, psx:pex],
+                raydirs[:, psy:pey, psx:pex],
                 cam_ori_t,
                 z,
             )
-            bg_img[:, :, sy:ey, sx:ex] = output_bg["fake_images"]
+            bg_img[:, :, sy:ey, sx:ex] = get_img_without_pad(
+                output_bg["fake_images"], sx, ex, sy, ey, psx, pex, psy, pey
+            )
 
     return bg_img
-
-
-def get_z(device):
-    return torch.randn(1, 256, dtype=torch.float32, device=device)
 
 
 def render_fg(
@@ -234,20 +266,23 @@ def render_fg(
         for j in range(CONSTANTS["GES_IMAGE_WIDTH"] // patch_size[1]):
             sy, sx = i * patch_size[0], j * patch_size[1]
             ey, ex = sy + patch_size[0], sx + patch_size[1]
-            _raydirs_part = _raydirs[:, sy:ey, sx:ex]
-            if torch.count_nonzero(_raydirs_part > 0):
+            psx, pex, psy, pey = get_pad_img_bbox(sx, ex, sy, ey)
+
+            if torch.count_nonzero(_raydirs[:, sy:ey, sx:ex] > 0):
                 output_fg = gancraft_fg(
                     _hf_seg,
-                    _voxel_id[:, sy:ey, sx:ex],
-                    depth2[:, sy:ey, sx:ex],
-                    _raydirs_part,
+                    _voxel_id[:, psy:pey, psx:pex],
+                    depth2[:, psy:pey, psx:pex],
+                    _raydirs[:, psy:pey, psx:pex],
                     cam_ori_t,
                     torch.from_numpy(np.array(building_stats)).unsqueeze(dim=0),
                     building_z,
                 )
                 mask = (voxel_id[:, sy:ey, sx:ex, 0, 0] == building_id).unsqueeze(dim=1)
-                fg_img[:, :, sy:ey, sx:ex] = output_fg["fake_images"] * mask
                 fg_mask[:, :, sy:ey, sx:ex] = mask
+                fg_img[:, :, sy:ey, sx:ex] = mask * get_img_without_pad(
+                    output_fg["fake_images"], sx, ex, sy, ey, psx, pex, psy, pey
+                )
 
     return fg_img, fg_mask
 
@@ -368,7 +403,7 @@ def main(
 
     # TODO: Generate camera trajectories
     logging.info("Generating camera poses ...")
-    cam_pos = [{"x": 767, "y": y, "z": 395} for y in range(917, 117, -20)]
+    cam_pos = [{"x": 767, "y": y, "z": 395} for y in range(517, 117, -20)]
 
     logging.info("Rendering videos ...")
     video = cv2.VideoWriter(
