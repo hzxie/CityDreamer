@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-06 16:20:00
+# @Last Modified at: 2023-06-06 16:47:54
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -20,17 +20,19 @@ class GanCraftGenerator(torch.nn.Module):
     def __init__(self, cfg):
         super(GanCraftGenerator, self).__init__()
         self.cfg = cfg
-        self.cond_hash_grid = ConditionalHashGrid(cfg)
-        self.grid_encoder = extensions.grid_encoder.GridEncoder(
-            in_channels=5,
-            n_levels=cfg.NETWORK.GANCRAFT.GRID_N_LEVELS,
-            lvl_channels=cfg.NETWORK.GANCRAFT.GRID_LEVEL_DIM,
-            desired_resolution=cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
-            if cfg.NETWORK.GANCRAFT.BUILDING_MODE
-            else cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-        )
         self.render_net = RenderMLP(cfg)
         self.denoiser = RenderCNN(cfg)
+        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
+            self.local_encoder = LocalEncoder(cfg)
+        if cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED:
+            self.grid_encoder = extensions.grid_encoder.GridEncoder(
+                in_channels=5,
+                n_levels=cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS,
+                lvl_channels=cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM,
+                desired_resolution=cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
+                if cfg.NETWORK.GANCRAFT.BUILDING_MODE
+                else cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+            )
 
     def forward(
         self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None, z=None
@@ -49,7 +51,6 @@ class GanCraftGenerator(torch.nn.Module):
             fake_images (N x 3 x H x W tensor): fake images
         """
         bs, device = hf_seg.size(0), hf_seg.device
-        global_features = self.cond_hash_grid(hf_seg)
         if z is None:
             z = torch.randn(
                 bs,
@@ -57,15 +58,23 @@ class GanCraftGenerator(torch.nn.Module):
                 dtype=torch.float32,
                 device=device,
             )
+
+        local_features = None
+        if (
+            self.cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED
+            or self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED
+        ):
+            local_features = self.local_encoder(hf_seg)
+
         net_out = self._forward_perpix(
-            global_features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
+            local_features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
         )
         fake_images = self._forward_global(net_out, z)
         return fake_images
 
     def _forward_perpix(
         self,
-        global_features,
+        local_features,
         voxel_id,
         depth2,
         raydirs,
@@ -76,7 +85,7 @@ class GanCraftGenerator(torch.nn.Module):
         r"""Sample points along rays, forwarding the per-point MLP and aggregate pixel features
 
         Args:
-            global_features (N x C1 tensor): Global block features determined by the current scene.
+            local_features (N x C1 tensor): Local features determined by the current pixel.
             voxel_id (N x H x W x M x 1 tensor): Voxel ids from ray-voxel intersection test. M: num intersected voxels
             depth2 (N x H x W x 2 x M x 1 tensor): Depths of entrance and exit points for each ray-voxel intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
@@ -140,7 +149,7 @@ class GanCraftGenerator(torch.nn.Module):
             mc_masks_onehot.scatter_(-1, mc_masks, 1.0)
 
         net_out_s, net_out_c = self._forward_perpix_sub(
-            global_features, worldcoord2, z, mc_masks_onehot
+            local_features, worldcoord2, z, mc_masks_onehot
         )
 
         # Blending
@@ -277,11 +286,11 @@ class GanCraftGenerator(torch.nn.Module):
         )
         return cumsum
 
-    def _forward_perpix_sub(self, global_features, worldcoord2, z, mc_masks_onehot):
+    def _forward_perpix_sub(self, local_features, worldcoord2, z, mc_masks_onehot):
         r"""Forwarding the MLP.
 
         Args:
-            global_features (N x C1 tensor): Global block features determined by the current scene.
+            local_features (N x C1 tensor): Local features determined by the current pixel.
             worldcoord2 (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
             z (N x C3 tensor): Intermediate style vectors.
             mc_masks_onehot (N x H x W x L x C4): One-hot segmentation maps.
@@ -310,15 +319,23 @@ class GanCraftGenerator(torch.nn.Module):
         # assert (normalized_cord <= 1).all()
         # assert (normalized_cord >= -1).all()
         # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))
-        global_features = global_features[:, None, None, None, :].repeat(
-            1,
-            normalized_cord.size(1),
-            normalized_cord.size(2),
-            normalized_cord.size(3),
-            1,
-        )
-        normalized_cord = torch.cat([normalized_cord, global_features], dim=-1)
-        feature_in = self.grid_encoder(normalized_cord)
+        # print(normalized_cord.size())   # torch.Size([1, 192, 192, 24, 3])
+
+        feature_in = None
+        if self.cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED:
+            local_features = local_features[:, None, None, None, :].repeat(
+                1,
+                normalized_cord.size(1),
+                normalized_cord.size(2),
+                normalized_cord.size(3),
+                1,
+            )
+            local_features = torch.cat([normalized_cord, local_features], dim=-1)
+            feature_in = self.grid_encoder(local_features)
+        elif self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
+            raise NotImplementedError
+        else:
+            feature_in = normalized_cord
 
         net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot)
         return net_out_s, net_out_c
@@ -339,9 +356,9 @@ class GanCraftGenerator(torch.nn.Module):
         return fake_images
 
 
-class ConditionalHashGrid(torch.nn.Module):
+class LocalEncoder(torch.nn.Module):
     def __init__(self, cfg):
-        super(ConditionalHashGrid, self).__init__()
+        super(LocalEncoder, self).__init__()
         n_classes = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
         self.hf_conv = torch.nn.Conv2d(1, 8, kernel_size=3, stride=2, padding=1)
         self.seg_conv = torch.nn.Conv2d(
@@ -353,7 +370,7 @@ class ConditionalHashGrid(torch.nn.Module):
         )
         conv_blocks = []
         cur_hidden_channels = 16
-        for _ in range(1, cfg.NETWORK.GANCRAFT.HASH_GRID_N_BLOCKS):
+        for _ in range(1, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_N_BLOCKS):
             conv_blocks.append(
                 SRTConvBlock(in_channels=cur_hidden_channels, out_channels=None)
             )
@@ -389,10 +406,21 @@ class RenderMLP(torch.nn.Module):
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             bias=False,
         )
-        self.fc_1 = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.GRID_N_LEVELS * cfg.NETWORK.GANCRAFT.GRID_LEVEL_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
+        if cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED:
+            self.fc_1 = torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
+                * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
+        elif cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
+            raise NotImplementedError
+        else:
+            # 3 -> x, y, z
+            self.fc_1 = torch.nn.Linear(
+                3,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
+
         self.fc_2 = ModLinear(
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
