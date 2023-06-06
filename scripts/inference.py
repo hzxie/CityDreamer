@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-02 11:15:45
+# @Last Modified at: 2023-06-06 16:16:15
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -208,7 +208,7 @@ def render_bg(patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_or
                 z,
             )
             bg_img[:, :, sy:ey, sx:ex] = get_img_without_pad(
-                output_bg["fake_images"], sx, ex, sy, ey, psx, pex, psy, pey
+                output_bg, sx, ex, sy, ey, psx, pex, psy, pey
             )
 
     return bg_img
@@ -281,7 +281,7 @@ def render_fg(
                 mask = (voxel_id[:, sy:ey, sx:ex, 0, 0] == building_id).unsqueeze(dim=1)
                 fg_mask[:, :, sy:ey, sx:ex] = mask
                 fg_img[:, :, sy:ey, sx:ex] = mask * get_img_without_pad(
-                    output_fg["fake_images"], sx, ex, sy, ey, psx, pex, psy, pey
+                    output_fg, sx, ex, sy, ey, psx, pex, psy, pey
                 )
 
     return fg_img, fg_mask

@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-01 20:44:59
+# @Last Modified at: 2023-06-06 16:20:00
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -57,23 +57,38 @@ class GanCraftGenerator(torch.nn.Module):
                 dtype=torch.float32,
                 device=device,
             )
-        normalized_cord, masks_onehot, new_dists = self._sample(
-            voxel_id, depth2, raydirs, cam_ori_t, building_stats
-        )
-        net_out, sigma = self._forward_perpix(
-            z, global_features, voxel_id, normalized_cord, masks_onehot, new_dists
+        net_out = self._forward_perpix(
+            global_features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
         )
         fake_images = self._forward_global(net_out, z)
-        return {
-            "fake_images": fake_images,
-            "global_features": global_features,
-            "normalized_cord": normalized_cord,
-            "masks_onehot": masks_onehot,
-            "sigma": sigma,
-            "z": z,
-        }
+        return fake_images
 
-    def _sample(self, voxel_id, depth2, raydirs, cam_ori_t, building_stats):
+    def _forward_perpix(
+        self,
+        global_features,
+        voxel_id,
+        depth2,
+        raydirs,
+        cam_ori_t,
+        z,
+        building_stats=None,
+    ):
+        r"""Sample points along rays, forwarding the per-point MLP and aggregate pixel features
+
+        Args:
+            global_features (N x C1 tensor): Global block features determined by the current scene.
+            voxel_id (N x H x W x M x 1 tensor): Voxel ids from ray-voxel intersection test. M: num intersected voxels
+            depth2 (N x H x W x 2 x M x 1 tensor): Depths of entrance and exit points for each ray-voxel intersection.
+            raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
+            cam_ori_t (N x 3 tensor): Camera origins.
+            z (N x C3 tensor): Intermediate style vectors.
+            building_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
+        """
+        # Generate sky_mask; PE transform on ray direction.
+        with torch.no_grad():
+            # sky_only_mask: when True, ray hits nothing but sky
+            sky_only_mask = voxel_id[:, :, :, [0], :] == 0
+
         with torch.no_grad():
             # Random sample points along the ray
             n_samples = self.cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY
@@ -106,26 +121,6 @@ class GanCraftGenerator(torch.nn.Module):
                 zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
                 worldcoord2[zero_rd_mask == 0] = 0
 
-            # Normalize the coordinates
-            if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-                h, w, d = (
-                    self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
-                    self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
-                    self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
-                )
-            else:
-                h, w, d = (
-                    self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-                    self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-                    self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
-                )
-            delimeter = torch.tensor([h, w, d], device=worldcoord2.device)
-            normalized_cord = worldcoord2 / delimeter * 2 - 1
-            # TODO: normalized_cord out of range [-1, 1]
-            normalized_cord[normalized_cord > 1] = 1
-            normalized_cord[normalized_cord < -1] = -1
-            # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))
-
             # Generate per-sample segmentation label
             mc_masks = torch.gather(voxel_id, -2, new_idx)
             # print(mc_masks.size())  # torch.Size([N, H, W, n_samples + 1, 1])
@@ -144,7 +139,23 @@ class GanCraftGenerator(torch.nn.Module):
             # print(mc_masks_onehot.size())  # torch.Size([N, H, W, n_samples + 1, 1])
             mc_masks_onehot.scatter_(-1, mc_masks, 1.0)
 
-        return normalized_cord, mc_masks_onehot, new_dists
+        net_out_s, net_out_c = self._forward_perpix_sub(
+            global_features, worldcoord2, z, mc_masks_onehot
+        )
+
+        # Blending
+        weights = self._volum_rendering_relu(
+            net_out_s, new_dists * self.cfg.NETWORK.GANCRAFT.DIST_SCALE, dim=-2
+        )
+        # If a ray exclusively hits the sky (no intersection with the voxels), set its weight to zero.
+        weights = weights * torch.logical_not(sky_only_mask).float()
+        # print(weights.size())   # torch.Size([N, H, W, n_samples + 1, 1])
+
+        rgbs = torch.clamp(net_out_c, -1, 1) + 1
+        net_out = torch.sum(weights * rgbs, dim=-2, keepdim=True)
+        net_out = net_out.squeeze(-2)
+        net_out = net_out - 1
+        return net_out
 
     def _sample_depth_batched(
         self,
@@ -250,46 +261,6 @@ class GanCraftGenerator(torch.nn.Module):
         # print(rand_depth.size())  # torch.Size([N, H, W, M, n_samples, 1])
         return rand_depth, new_dists, idx
 
-    def _forward_perpix(
-        self, z, global_features, voxel_id, normalized_cord, mc_masks_onehot, new_dists
-    ):
-        r"""Sample points along rays, forwarding the per-point MLP and aggregate pixel features
-
-        Args:
-            global_features (N x C1 tensor): Global block features determined by the current scene.
-            voxel_id (N x H x W x M x 1 tensor): Voxel ids from ray-voxel intersection test. M: num intersected voxels
-            depth2 (N x H x W x 2 x M x 1 tensor): Depths of entrance and exit points for each ray-voxel intersection.
-            raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
-            cam_ori_t (N x 3 tensor): Camera origins.
-            z (N x C3 tensor): Intermediate style vectors.
-            building_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
-        """
-        net_out_s, net_out_c = self.forward_perpix_sub(
-            global_features, normalized_cord, z, mc_masks_onehot
-        )
-        # print(net_out_s.shape)  # torch.Size([N, H, W, n_samples, 1])
-        # print(net_out_c.shape)  # torch.Size([N, H, W, n_samples, 64])
-
-        # Generate sky_mask; PE transform on ray direction.
-        with torch.no_grad():
-            # sky_only_mask: when True, ray hits nothing but sky
-            sky_only_mask = voxel_id[:, :, :, [0], :] == 0
-
-        # Blending
-        weights = self._volum_rendering_relu(
-            net_out_s, new_dists * self.cfg.NETWORK.GANCRAFT.DIST_SCALE, dim=-2
-        )
-        # If a ray exclusively hits the sky (no intersection with the voxels), set its weight to zero.
-        weights = weights * torch.logical_not(sky_only_mask).float()
-        # print(weights.size())   # torch.Size([N, H, W, n_samples + 1, 1])
-
-        rgbs = torch.clamp(net_out_c, -1, 1) + 1
-        # print(rgbs.shape)  # torch.Size([N, H, W, n_samples, 64])
-        net_out = torch.sum(weights * rgbs, dim=-2, keepdim=True)
-        net_out = net_out.squeeze(-2)
-        net_out = net_out - 1
-        return net_out, net_out_s
-
     def _volum_rendering_relu(self, sigma, dists, dim=2):
         free_energy = F.relu(sigma) * dists
         a = 1 - torch.exp(-free_energy.float())  # probability of it is not empty here
@@ -306,19 +277,39 @@ class GanCraftGenerator(torch.nn.Module):
         )
         return cumsum
 
-    def forward_perpix_sub(self, global_features, normalized_cord, z, mc_masks_onehot):
+    def _forward_perpix_sub(self, global_features, worldcoord2, z, mc_masks_onehot):
         r"""Forwarding the MLP.
 
         Args:
             global_features (N x C1 tensor): Global block features determined by the current scene.
-            normalized_cord (N x H x W x L x 3 tensor): Normalized 3D world coordinates of sampled points.
-                                                        L is number of samples; N is batch size, always 1.
+            worldcoord2 (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
             z (N x C3 tensor): Intermediate style vectors.
             mc_masks_onehot (N x H x W x L x C4): One-hot segmentation maps.
         Returns:
             net_out_s (N x H x W x L x 1 tensor): Opacities.
             net_out_c (N x H x W x L x C5 tensor): Color embeddings.
         """
+        if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+            h, w, d = (
+                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
+                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
+                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
+            )
+        else:
+            h, w, d = (
+                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
+            )
+
+        delimeter = torch.tensor([h, w, d], device=worldcoord2.device)
+        normalized_cord = worldcoord2 / delimeter * 2 - 1
+        # TODO: Temporary fix
+        normalized_cord[normalized_cord > 1] = 1
+        normalized_cord[normalized_cord < -1] = -1
+        # assert (normalized_cord <= 1).all()
+        # assert (normalized_cord >= -1).all()
+        # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))
         global_features = global_features[:, None, None, None, :].repeat(
             1,
             normalized_cord.size(1),
