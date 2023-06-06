@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-06 16:47:54
+# @Last Modified at: 2023-06-06 19:49:39
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -26,7 +26,7 @@ class GanCraftGenerator(torch.nn.Module):
             self.local_encoder = LocalEncoder(cfg)
         if cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED:
             self.grid_encoder = extensions.grid_encoder.GridEncoder(
-                in_channels=5,
+                in_channels=3,
                 n_levels=cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS,
                 lvl_channels=cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM,
                 desired_resolution=cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
@@ -60,10 +60,7 @@ class GanCraftGenerator(torch.nn.Module):
             )
 
         local_features = None
-        if (
-            self.cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED
-            or self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED
-        ):
+        if self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
             local_features = self.local_encoder(hf_seg)
 
         net_out = self._forward_perpix(
@@ -323,15 +320,7 @@ class GanCraftGenerator(torch.nn.Module):
 
         feature_in = None
         if self.cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED:
-            local_features = local_features[:, None, None, None, :].repeat(
-                1,
-                normalized_cord.size(1),
-                normalized_cord.size(2),
-                normalized_cord.size(3),
-                1,
-            )
-            local_features = torch.cat([normalized_cord, local_features], dim=-1)
-            feature_in = self.grid_encoder(local_features)
+            feature_in = self.grid_encoder(normalized_cord)
         elif self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
             raise NotImplementedError
         else:
