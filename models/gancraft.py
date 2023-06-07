@@ -1,12 +1,14 @@
 # -*- coding: utf-8 -*-
 #
 # @File:   gancraft.py
-# @Author: Zhaoxi Chen (@FrozenBurning)
+# @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-07 13:54:20
+# @Last Modified at: 2023-06-07 19:59:29
 # @Email:  root@haozhexie.com
-# @Ref: https://github.com/FrozenBurning/SceneDreamer
+# @Ref:
+# - https://github.com/FrozenBurning/SceneDreamer
+# - https://github.com/marcoamonteiro/pi-GAN/
 
 import numpy as np
 import torch
@@ -20,10 +22,9 @@ class GanCraftGenerator(torch.nn.Module):
     def __init__(self, cfg):
         super(GanCraftGenerator, self).__init__()
         self.cfg = cfg
-        self.render_net = RenderMLP(cfg)
-        self.denoiser = RenderCNN(cfg)
         if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
             self.local_encoder = LocalEncoder(cfg)
+
         if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
             self.grid_encoder = extensions.grid_encoder.GridEncoder(
                 in_channels=3,
@@ -33,6 +34,16 @@ class GanCraftGenerator(torch.nn.Module):
                 if cfg.NETWORK.GANCRAFT.BUILDING_MODE
                 else cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
             )
+
+        if cfg.NETWORK.GANCRAFT.RENDER_USE_SIREN:
+            self.render_net = RenderSIREN(cfg)
+        else:
+            self.render_net = RenderMLP(cfg)
+
+        if cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR != 3:
+            self.denoiser = RenderCNN(cfg)
+        else:
+            self.denoiser = None
 
     def forward(
         self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None, z=None
@@ -96,37 +107,13 @@ class GanCraftGenerator(torch.nn.Module):
             sky_only_mask = voxel_id[:, :, :, [0], :] == 0
 
         with torch.no_grad():
-            # Random sample points along the ray
-            n_samples = self.cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY
-            rand_depth, new_dists, new_idx = self._sample_depth_batched(
+            normalized_cord, new_dists, new_idx = self._get_normalized_coordinates(
+                self.cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY,
                 depth2,
-                n_samples + 1,
-                deterministic=False,
-                use_box_boundaries=False,
-                sample_depth=3,
+                raydirs,
+                cam_ori_t,
+                building_stats,
             )
-
-            nan_mask = torch.isnan(rand_depth)
-            inf_mask = torch.isinf(rand_depth)
-            rand_depth[nan_mask | inf_mask] = 0.0
-            worldcoord2 = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
-            # assert worldcoord2.shape[-1] == 3
-            if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-                assert building_stats is not None
-                # Make the building object-centric
-                center_offset = (
-                    self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE
-                    - self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
-                ) / 2
-                building_stats = building_stats[:, None, None, None, :].repeat(
-                    1, worldcoord2.size(1), worldcoord2.size(2), worldcoord2.size(3), 1
-                )
-                worldcoord2[..., 0] -= building_stats[..., 0] + center_offset
-                worldcoord2[..., 1] -= building_stats[..., 1] + center_offset
-                # TODO: Fix non-building rays
-                zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
-                worldcoord2[zero_rd_mask == 0] = 0
-
             # Generate per-sample segmentation label
             mc_masks = torch.gather(voxel_id, -2, new_idx)
             # print(mc_masks.size())  # torch.Size([N, H, W, n_samples + 1, 1])
@@ -146,9 +133,8 @@ class GanCraftGenerator(torch.nn.Module):
             mc_masks_onehot.scatter_(-1, mc_masks, 1.0)
 
         net_out_s, net_out_c = self._forward_perpix_sub(
-            local_features, worldcoord2, z, mc_masks_onehot
+            local_features, normalized_cord, z, mc_masks_onehot, raydirs
         )
-
         # Blending
         weights = self._volum_rendering_relu(
             net_out_s, new_dists * self.cfg.NETWORK.GANCRAFT.DIST_SCALE, dim=-2
@@ -162,6 +148,62 @@ class GanCraftGenerator(torch.nn.Module):
         net_out = net_out.squeeze(-2)
         net_out = net_out - 1
         return net_out
+
+    def _get_normalized_coordinates(
+        self, n_samples, depth2, raydirs, cam_ori_t, building_stats=None
+    ):
+        # Random sample points along the ray
+        rand_depth, new_dists, new_idx = self._sample_depth_batched(
+            depth2,
+            n_samples + 1,
+            deterministic=False,
+            use_box_boundaries=False,
+            sample_depth=3,
+        )
+        nan_mask = torch.isnan(rand_depth)
+        inf_mask = torch.isinf(rand_depth)
+        rand_depth[nan_mask | inf_mask] = 0.0
+        worldcoord2 = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
+        # assert worldcoord2.shape[-1] == 3
+        if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+            assert building_stats is not None
+            # Make the building object-centric
+            center_offset = (
+                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE
+                - self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
+            ) / 2
+            building_stats = building_stats[:, None, None, None, :].repeat(
+                1, worldcoord2.size(1), worldcoord2.size(2), worldcoord2.size(3), 1
+            )
+            worldcoord2[..., 0] -= building_stats[..., 0] + center_offset
+            worldcoord2[..., 1] -= building_stats[..., 1] + center_offset
+            # TODO: Fix non-building rays
+            zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
+            worldcoord2[zero_rd_mask == 0] = 0
+
+        if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
+            h, w, d = (
+                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
+                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
+                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
+            )
+        else:
+            h, w, d = (
+                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
+            )
+
+        delimeter = torch.tensor([h, w, d], device=worldcoord2.device)
+        normalized_cord = worldcoord2 / delimeter * 2 - 1
+        # TODO: Temporary fix
+        normalized_cord[normalized_cord > 1] = 1
+        normalized_cord[normalized_cord < -1] = -1
+        # assert (normalized_cord <= 1).all()
+        # assert (normalized_cord >= -1).all()
+        # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))
+        # print(normalized_cord.size())   # torch.Size([1, 192, 192, 24, 3])
+        return normalized_cord, new_dists, new_idx
 
     def _sample_depth_batched(
         self,
@@ -186,7 +228,6 @@ class GanCraftGenerator(torch.nn.Module):
             use_box_boundaries (bool): Whether to add the entrance / exit points into the sample.
             sample_depth (float): Truncate the ray when it travels further than sample_depth inside voxels.
         """
-
         bs = depth2.size(0)
         dim0 = depth2.size(1)
         dim1 = depth2.size(2)
@@ -283,41 +324,21 @@ class GanCraftGenerator(torch.nn.Module):
         )
         return cumsum
 
-    def _forward_perpix_sub(self, local_features, worldcoord2, z, mc_masks_onehot):
+    def _forward_perpix_sub(
+        self, local_features, normalized_cord, z, mc_masks_onehot, raydirs
+    ):
         r"""Forwarding the MLP.
 
         Args:
             local_features (N x C1 tensor): Local features determined by the current pixel.
-            worldcoord2 (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
+            normalized_cord (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
             z (N x C3 tensor): Intermediate style vectors.
             mc_masks_onehot (N x H x W x L x C4): One-hot segmentation maps.
+            raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
         Returns:
             net_out_s (N x H x W x L x 1 tensor): Opacities.
             net_out_c (N x H x W x L x C5 tensor): Color embeddings.
         """
-        if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-            h, w, d = (
-                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
-                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
-                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
-            )
-        else:
-            h, w, d = (
-                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
-            )
-
-        delimeter = torch.tensor([h, w, d], device=worldcoord2.device)
-        normalized_cord = worldcoord2 / delimeter * 2 - 1
-        # TODO: Temporary fix
-        normalized_cord[normalized_cord > 1] = 1
-        normalized_cord[normalized_cord < -1] = -1
-        # assert (normalized_cord <= 1).all()
-        # assert (normalized_cord >= -1).all()
-        # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))
-        # print(normalized_cord.size())   # torch.Size([1, 192, 192, 24, 3])
-
         feature_in = None
         if self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
             raise NotImplementedError
@@ -339,7 +360,7 @@ class GanCraftGenerator(torch.nn.Module):
         else:
             feature_in = normalized_cord
 
-        net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot)
+        net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot, raydirs)
         return net_out_s, net_out_c
 
     def _forward_global(self, net_out, z):
@@ -353,8 +374,10 @@ class GanCraftGenerator(torch.nn.Module):
             fake_images (N x 3 x H x W tensor): Output image.
         """
         fake_images = net_out.permute(0, 3, 1, 2).contiguous()
-        fake_images_raw = self.denoiser(fake_images, z)
-        fake_images = torch.tanh(fake_images_raw)
+        if self.denoiser is not None:
+            fake_images = self.denoiser(fake_images, z)
+
+        fake_images = torch.tanh(fake_images)
         return fake_images
 
 
@@ -403,31 +426,29 @@ class RenderMLP(torch.nn.Module):
 
     def __init__(self, cfg):
         super(RenderMLP, self).__init__()
+
+        in_dim = 0
+        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
+            raise NotImplementedError
+        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
+            in_dim += (
+                cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
+                * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
+            )
+        elif cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "SINE_COSINE":
+            in_dim += 3 + 6 * cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
+        else:
+            in_dim += 3
+
         self.fc_m_a = torch.nn.Linear(
             cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             bias=False,
         )
-        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
-            raise NotImplementedError
-
-        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
-            self.fc_1 = torch.nn.Linear(
-                cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
-                * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM,
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            )
-        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "SINE_COSINE":
-            self.fc_1 = torch.nn.Linear(
-                3 + 6 * cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS,
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            )
-        else:
-            self.fc_1 = torch.nn.Linear(
-                3,
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            )
-
+        self.fc_1 = torch.nn.Linear(
+            in_dim,
+            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+        )
         self.fc_2 = ModLinear(
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
@@ -480,7 +501,7 @@ class RenderMLP(torch.nn.Module):
         )
         self.act = torch.nn.LeakyReLU(negative_slope=0.2)
 
-    def forward(self, x, z, m):
+    def forward(self, x, z, m, _):
         r"""Forward network
 
         Args:
@@ -504,6 +525,182 @@ class RenderMLP(torch.nn.Module):
         f = self.act(self.fc_6(f, z))
         c = self.fc_out_c(f)
         return sigma, c
+
+
+class RenderSIREN(torch.nn.Module):
+    r"""Primary SIREN  architecture used in pi-GAN generators."""
+
+    def __init__(self, cfg):
+        super(RenderSIREN, self).__init__()
+        self.cfg = cfg
+
+        in_dim = 0
+        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
+            raise NotImplementedError
+        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
+            in_dim += (
+                cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
+                * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
+            )
+        elif cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "SINE_COSINE":
+            in_dim += 3 + 6 * cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
+        else:
+            in_dim += 3
+
+        self.film_m = FiLMLayer(
+            cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+        )
+        self.film_layers = torch.nn.ModuleList(
+            [
+                FiLMLayer(in_dim, cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM),
+                FiLMLayer(
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                ),
+                FiLMLayer(
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                ),
+                FiLMLayer(
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                ),
+                FiLMLayer(
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                ),
+                FiLMLayer(
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                ),
+                FiLMLayer(
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                ),
+                FiLMLayer(
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                ),
+            ]
+        )
+        self.fc_sigma = torch.nn.Linear(
+            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA,
+        )
+        self.film_rgb = FiLMLayer(
+            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM + 3,
+            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+        )
+        self.fc_rgb = torch.nn.Linear(
+            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR,
+        )
+        self.mapper = torch.nn.Sequential(
+            torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            ),
+            torch.nn.LeakyReLU(0.2, inplace=True),
+            torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            ),
+            torch.nn.LeakyReLU(0.2, inplace=True),
+            torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            ),
+            torch.nn.LeakyReLU(0.2, inplace=True),
+            torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                (cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM * 2)
+                * (len(self.film_layers) + 2),
+            ),
+        )
+        self._init_weights()
+
+    def _init_weights(self):
+        # Initialize the FC layers in mapper
+        kaiming_init = (
+            lambda m: torch.nn.init.kaiming_normal_(
+                m.weight, a=0.2, mode="fan_in", nonlinearity="leaky_relu"
+            )
+            if isinstance(m, torch.nn.Linear)
+            else None
+        )
+        with torch.no_grad():
+            self.mapper.apply(kaiming_init)
+        # Initialize the FiLM layers
+        film_init = (
+            lambda m: m.weight.uniform_(
+                -np.sqrt(6 / m.weight.size(-1)) / 25,
+                np.sqrt(6 / m.weight.size(-1)) / 25,
+            )
+            if isinstance(m, torch.nn.Linear)
+            else None
+        )
+        with torch.no_grad():
+            self.film_m.apply(film_init)
+            self.film_layers.apply(film_init)
+            self.fc_sigma.apply(film_init)
+            self.film_rgb.apply(film_init)
+            self.fc_rgb.apply(film_init)
+        # Initialize the first FiLM layer
+        first_film_init = (
+            lambda m: m.weight.uniform_(-1 / m.weight.size(-1), 1 / m.weight.size(-1))
+            if isinstance(m, torch.nn.Linear)
+            else None
+        )
+        with torch.no_grad():
+            self.film_layers[0].apply(first_film_init)
+
+    def forward(self, x, z, m, raydirs):
+        # print(x.size())       # torch.Size([N, H, W, n_samples, ?])
+        # print(m.size())       # torch.Size([N, H, W, n_samples, n_classes])
+        # print(raydirs.size()) # torch.Size([N, H, W, 1, 3])
+        frequencies = self.mapper(z)
+        freq_dim = frequencies.size(1) // 2
+        phase_shifts = frequencies[:, None, None, None, freq_dim:]
+        frequencies = frequencies[:, None, None, None, :freq_dim]
+        frequencies = frequencies * 15 + 30
+
+        hidden_dim = self.cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM
+        for i, fl in enumerate(self.film_layers):
+            freq_offset = i * hidden_dim
+            x = fl(
+                x,
+                frequencies[..., freq_offset : freq_offset + hidden_dim],
+                phase_shifts[..., freq_offset : freq_offset + hidden_dim],
+            )
+            if i == 0:
+                x = x + self.film_m(
+                    m,
+                    frequencies[..., -2 * hidden_dim : -hidden_dim],
+                    phase_shifts[..., -2 * hidden_dim : -hidden_dim],
+                )
+
+        sigma = self.fc_sigma(x)
+        raydirs = raydirs.repeat(1, 1, 1, x.size(3), 1)
+        c = self.film_rgb(
+            torch.cat([raydirs, x], dim=-1),
+            frequencies[..., -hidden_dim:],
+            phase_shifts[..., -hidden_dim:],
+        )
+        c = self.fc_rgb(c)
+        # print(sigma.size()) # torch.Size([N, H, W, n_samples, 1])
+        # print(c.size())     # torch.Size([N, H, W, n_samples, 3])
+        return sigma, c
+
+
+class FiLMLayer(torch.nn.Module):
+    def __init__(self, input_dim, hidden_dim):
+        super().__init__()
+        self.layer = torch.nn.Linear(input_dim, hidden_dim)
+
+    def forward(self, x, freq, phase_shift):
+        x = self.layer(x)
+        return torch.sin(freq * x + phase_shift)
 
 
 class RenderCNN(torch.nn.Module):
