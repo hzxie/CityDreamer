@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-06 19:49:39
+# @Last Modified at: 2023-06-07 13:54:20
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -24,7 +24,7 @@ class GanCraftGenerator(torch.nn.Module):
         self.denoiser = RenderCNN(cfg)
         if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
             self.local_encoder = LocalEncoder(cfg)
-        if cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED:
+        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
             self.grid_encoder = extensions.grid_encoder.GridEncoder(
                 in_channels=3,
                 n_levels=cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS,
@@ -319,10 +319,23 @@ class GanCraftGenerator(torch.nn.Module):
         # print(normalized_cord.size())   # torch.Size([1, 192, 192, 24, 3])
 
         feature_in = None
-        if self.cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED:
-            feature_in = self.grid_encoder(normalized_cord)
-        elif self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
+        if self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
             raise NotImplementedError
+        if self.cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
+            feature_in = self.grid_encoder(normalized_cord)
+        elif self.cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "SINE_COSINE":
+            freq_bands = 2.0 ** torch.linspace(
+                0,
+                self.cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS - 1,
+                steps=self.cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS,
+            )
+            cord_sin = torch.cat(
+                [torch.sin(normalized_cord * fb) for fb in freq_bands], dim=-1
+            )
+            cord_cos = torch.cat(
+                [torch.cos(normalized_cord * fb) for fb in freq_bands], dim=-1
+            )
+            feature_in = torch.cat([cord_sin, cord_cos, normalized_cord], dim=-1)
         else:
             feature_in = normalized_cord
 
@@ -395,16 +408,21 @@ class RenderMLP(torch.nn.Module):
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             bias=False,
         )
-        if cfg.NETWORK.GANCRAFT.HASH_GRID_ENABLED:
+        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
+            raise NotImplementedError
+
+        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
             self.fc_1 = torch.nn.Linear(
                 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
                 * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM,
                 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             )
-        elif cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
-            raise NotImplementedError
+        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "SINE_COSINE":
+            self.fc_1 = torch.nn.Linear(
+                3 + 6 * cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
         else:
-            # 3 -> x, y, z
             self.fc_1 = torch.nn.Linear(
                 3,
                 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
