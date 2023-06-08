@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-08 16:33:53
+# @Last Modified at: 2023-06-08 19:45:30
 # @Email:  root@haozhexie.com
 # @Ref:
 # - https://github.com/FrozenBurning/SceneDreamer
@@ -401,9 +401,9 @@ class GanCraftGenerator(torch.nn.Module):
                 feature_in = torch.cat([cord_sin, cord_cos, feature_in], dim=-1)
         else:
             if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
-                feature_in = normalized_cord
-            else:
                 feature_in = torch.cat([normalized_cord, feature_in], dim=-1)
+            else:
+                feature_in = normalized_cord
 
         net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot, raydirs)
         return net_out_s, net_out_c
@@ -471,31 +471,26 @@ class RenderMLP(torch.nn.Module):
 
     def __init__(self, cfg):
         super(RenderMLP, self).__init__()
-        in_dim = 0
+        include_features = cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+        if cfg.NETWORK.GANCRAFT.POS_EMD in ["HASH_GRID", "SINE_COSINE"]:
+            include_features &= not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+        else:
+            include_features &= cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+
+        in_dim = cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM if include_features else 0
         if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
-            in_dim = (
+            in_dim += (
                 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
                 * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
             )
         elif cfg.NETWORK.GANCRAFT.POS_EMD == "SINE_COSINE":
-            in_dim = (
+            in_dim += (
                 cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
-                * (
-                    cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM + 3
-                    if cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
-                    and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-                    else 3
-                )
+                * (cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM + 3 if include_features else 3)
                 * 2
             )
         else:
-            in_dim = 3
-
-        if (
-            cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
-            and not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-        ):
-            in_dim += cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
+            in_dim += 3
 
         self.fc_m_a = torch.nn.Linear(
             cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
@@ -590,31 +585,26 @@ class RenderSIREN(torch.nn.Module):
     def __init__(self, cfg):
         super(RenderSIREN, self).__init__()
         self.cfg = cfg
-        in_dim = 0
+        include_features = cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+        if cfg.NETWORK.GANCRAFT.POS_EMD in ["HASH_GRID", "SINE_COSINE"]:
+            include_features &= not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+        else:
+            include_features &= cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+
+        in_dim = cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM if include_features else 0
         if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
-            in_dim = (
+            in_dim += (
                 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
                 * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
             )
         elif cfg.NETWORK.GANCRAFT.POS_EMD == "SINE_COSINE":
-            in_dim = (
+            in_dim += (
                 cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
-                * (
-                    cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM + 3
-                    if cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
-                    and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-                    else 3
-                )
+                * (cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM + 3 if include_features else 3)
                 * 2
             )
         else:
-            in_dim = 3
-
-        if (
-            cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
-            and not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-        ):
-            in_dim += cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
+            in_dim += 3
 
         self.film_m = FiLMLayer(
             cfg.DATASETS.OSM_LAYOUT.N_CLASSES,

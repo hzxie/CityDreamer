@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-30 10:21:26
+# @Last Modified at: 2023-06-08 19:06:05
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -552,6 +552,13 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                             "min_bld_ins_id": 10,
                         },
                         "objects": ["voxel_id", "seg"],
+                    },
+                    {
+                        "callback": "MaskRaydirs",
+                        "parameters": {
+                            "src_attr": "raydirs",
+                            "target_value": BULIDING_MASK_ID,
+                        },
                     },
                     {
                         "callback": "CenterCropTarget",

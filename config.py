@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-08 16:34:07
+# @Last Modified at: 2023-06-08 19:46:46
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -102,7 +102,7 @@ cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY     = 24
 cfg.NETWORK.GANCRAFT.DIST_SCALE                  = 0.25
 cfg.NETWORK.GANCRAFT.ENCODER                     = "GLOBAL"
 cfg.NETWORK.GANCRAFT.ENCODER_N_BLOCKS            = 6
-cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM             = 5
+cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM             = 2
 cfg.NETWORK.GANCRAFT.POS_EMD                     = "HASH_GRID"
 cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES     = True
 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS          = 16
