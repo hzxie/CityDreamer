@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-07 19:59:29
+# @Last Modified at: 2023-06-08 16:33:53
 # @Email:  root@haozhexie.com
 # @Ref:
 # - https://github.com/FrozenBurning/SceneDreamer
@@ -22,12 +22,23 @@ class GanCraftGenerator(torch.nn.Module):
     def __init__(self, cfg):
         super(GanCraftGenerator, self).__init__()
         self.cfg = cfg
-        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
-            self.local_encoder = LocalEncoder(cfg)
+        if cfg.NETWORK.GANCRAFT.ENCODER == "GLOBAL":
+            self.encoder = GlobalEncoder(cfg)
+        elif cfg.NETWORK.GANCRAFT.ENCODER == "LOCAL":
+            raise NotImplementedError
+        else:
+            self.encoder = None
 
-        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
+        if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
+            grid_encoder_in_dim = 3
+            if (
+                cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+                and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+            ):
+                grid_encoder_in_dim += cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
+
             self.grid_encoder = extensions.grid_encoder.GridEncoder(
-                in_channels=3,
+                in_channels=grid_encoder_in_dim,
                 n_levels=cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS,
                 lvl_channels=cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM,
                 desired_resolution=cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
@@ -70,19 +81,19 @@ class GanCraftGenerator(torch.nn.Module):
                 device=device,
             )
 
-        local_features = None
-        if self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
-            local_features = self.local_encoder(hf_seg)
+        features = None
+        if self.encoder is not None:
+            features = self.encoder(hf_seg)
 
         net_out = self._forward_perpix(
-            local_features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
+            features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
         )
         fake_images = self._forward_global(net_out, z)
         return fake_images
 
     def _forward_perpix(
         self,
-        local_features,
+        features,
         voxel_id,
         depth2,
         raydirs,
@@ -93,7 +104,7 @@ class GanCraftGenerator(torch.nn.Module):
         r"""Sample points along rays, forwarding the per-point MLP and aggregate pixel features
 
         Args:
-            local_features (N x C1 tensor): Local features determined by the current pixel.
+            features (N x C1 tensor): Local features determined by the current pixel.
             voxel_id (N x H x W x M x 1 tensor): Voxel ids from ray-voxel intersection test. M: num intersected voxels
             depth2 (N x H x W x 2 x M x 1 tensor): Depths of entrance and exit points for each ray-voxel intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
@@ -133,7 +144,7 @@ class GanCraftGenerator(torch.nn.Module):
             mc_masks_onehot.scatter_(-1, mc_masks, 1.0)
 
         net_out_s, net_out_c = self._forward_perpix_sub(
-            local_features, normalized_cord, z, mc_masks_onehot, raydirs
+            features, normalized_cord, z, mc_masks_onehot, raydirs
         )
         # Blending
         weights = self._volum_rendering_relu(
@@ -325,12 +336,12 @@ class GanCraftGenerator(torch.nn.Module):
         return cumsum
 
     def _forward_perpix_sub(
-        self, local_features, normalized_cord, z, mc_masks_onehot, raydirs
+        self, features, normalized_cord, z, mc_masks_onehot, raydirs
     ):
         r"""Forwarding the MLP.
 
         Args:
-            local_features (N x C1 tensor): Local features determined by the current pixel.
+            features (N x C1 tensor): Local features determined by the current pixel.
             normalized_cord (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
             z (N x C3 tensor): Intermediate style vectors.
             mc_masks_onehot (N x H x W x L x C4): One-hot segmentation maps.
@@ -339,26 +350,60 @@ class GanCraftGenerator(torch.nn.Module):
             net_out_s (N x H x W x L x 1 tensor): Opacities.
             net_out_c (N x H x W x L x C5 tensor): Color embeddings.
         """
-        feature_in = None
-        if self.cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
+        feature_in = torch.empty(
+            normalized_cord.size(0),
+            normalized_cord.size(1),
+            normalized_cord.size(2),
+            normalized_cord.size(3),
+            0,
+            device=normalized_cord.device,
+        )
+        if self.cfg.NETWORK.GANCRAFT.ENCODER == "GLOBAL":
+            # print(features.size())  # torch.Size([N, ENCODER_OUT_DIM])
+            features = features[:, None, None, None, :].repeat(
+                1,
+                normalized_cord.size(1),
+                normalized_cord.size(2),
+                normalized_cord.size(3),
+                1,
+            )
+            feature_in = torch.cat([feature_in, features], dim=-1)
+        elif self.cfg.NETWORK.GANCRAFT.ENCODER == "LOCAL":
             raise NotImplementedError
-        if self.cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
-            feature_in = self.grid_encoder(normalized_cord)
-        elif self.cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "SINE_COSINE":
+
+        if self.cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
+            if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                feature_in = self.grid_encoder(
+                    torch.cat([normalized_cord, feature_in], dim=-1)
+                )
+            else:
+                feature_in = torch.cat(
+                    [self.grid_encoder(normalized_cord), feature_in], dim=-1
+                )
+        elif self.cfg.NETWORK.GANCRAFT.POS_EMD == "SINE_COSINE":
             freq_bands = 2.0 ** torch.linspace(
                 0,
                 self.cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS - 1,
                 steps=self.cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS,
             )
+            if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                normalized_cord = torch.cat([normalized_cord, feature_in], dim=-1)
+
             cord_sin = torch.cat(
                 [torch.sin(normalized_cord * fb) for fb in freq_bands], dim=-1
             )
             cord_cos = torch.cat(
                 [torch.cos(normalized_cord * fb) for fb in freq_bands], dim=-1
             )
-            feature_in = torch.cat([cord_sin, cord_cos, normalized_cord], dim=-1)
+            if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                feature_in = torch.cat([cord_sin, cord_cos], dim=-1)
+            else:
+                feature_in = torch.cat([cord_sin, cord_cos, feature_in], dim=-1)
         else:
-            feature_in = normalized_cord
+            if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                feature_in = normalized_cord
+            else:
+                feature_in = torch.cat([normalized_cord, feature_in], dim=-1)
 
         net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot, raydirs)
         return net_out_s, net_out_c
@@ -376,14 +421,14 @@ class GanCraftGenerator(torch.nn.Module):
         fake_images = net_out.permute(0, 3, 1, 2).contiguous()
         if self.denoiser is not None:
             fake_images = self.denoiser(fake_images, z)
+            fake_images = torch.tanh(fake_images)
 
-        fake_images = torch.tanh(fake_images)
         return fake_images
 
 
-class LocalEncoder(torch.nn.Module):
+class GlobalEncoder(torch.nn.Module):
     def __init__(self, cfg):
-        super(LocalEncoder, self).__init__()
+        super(GlobalEncoder, self).__init__()
         n_classes = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
         self.hf_conv = torch.nn.Conv2d(1, 8, kernel_size=3, stride=2, padding=1)
         self.seg_conv = torch.nn.Conv2d(
@@ -395,7 +440,7 @@ class LocalEncoder(torch.nn.Module):
         )
         conv_blocks = []
         cur_hidden_channels = 16
-        for _ in range(1, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_N_BLOCKS):
+        for _ in range(1, cfg.NETWORK.GANCRAFT.ENCODER_N_BLOCKS):
             conv_blocks.append(
                 SRTConvBlock(in_channels=cur_hidden_channels, out_channels=None)
             )
@@ -403,7 +448,7 @@ class LocalEncoder(torch.nn.Module):
 
         self.conv_blocks = torch.nn.Sequential(*conv_blocks)
         self.fc1 = torch.nn.Linear(cur_hidden_channels, 16)
-        self.fc2 = torch.nn.Linear(16, 2)
+        self.fc2 = torch.nn.Linear(16, cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM)
         self.act = torch.nn.LeakyReLU(0.2)
 
     def forward(self, hf_seg):
@@ -426,19 +471,31 @@ class RenderMLP(torch.nn.Module):
 
     def __init__(self, cfg):
         super(RenderMLP, self).__init__()
-
         in_dim = 0
-        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
-            raise NotImplementedError
-        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
-            in_dim += (
+        if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
+            in_dim = (
                 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
                 * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
             )
-        elif cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "SINE_COSINE":
-            in_dim += 3 + 6 * cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
+        elif cfg.NETWORK.GANCRAFT.POS_EMD == "SINE_COSINE":
+            in_dim = (
+                cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
+                * (
+                    cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM + 3
+                    if cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+                    and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+                    else 3
+                )
+                * 2
+            )
         else:
-            in_dim += 3
+            in_dim = 3
+
+        if (
+            cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+            and not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+        ):
+            in_dim += cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
 
         self.fc_m_a = torch.nn.Linear(
             cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
@@ -533,19 +590,31 @@ class RenderSIREN(torch.nn.Module):
     def __init__(self, cfg):
         super(RenderSIREN, self).__init__()
         self.cfg = cfg
-
         in_dim = 0
-        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_ENABLED:
-            raise NotImplementedError
-        if cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "HASH_GRID":
-            in_dim += (
+        if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
+            in_dim = (
                 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
                 * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
             )
-        elif cfg.NETWORK.GANCRAFT.POSITIONAL_EMBEDDING == "SINE_COSINE":
-            in_dim += 3 + 6 * cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
+        elif cfg.NETWORK.GANCRAFT.POS_EMD == "SINE_COSINE":
+            in_dim = (
+                cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
+                * (
+                    cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM + 3
+                    if cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+                    and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+                    else 3
+                )
+                * 2
+            )
         else:
-            in_dim += 3
+            in_dim = 3
+
+        if (
+            cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+            and not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+        ):
+            in_dim += cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
 
         self.film_m = FiLMLayer(
             cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
