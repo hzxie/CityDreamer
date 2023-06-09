@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-08 19:45:30
+# @Last Modified at: 2023-06-09 11:21:25
 # @Email:  root@haozhexie.com
 # @Ref:
 # - https://github.com/FrozenBurning/SceneDreamer
@@ -29,15 +29,23 @@ class GanCraftGenerator(torch.nn.Module):
         else:
             self.encoder = None
 
+        if (
+            not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+            and not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+        ):
+            raise ValueError(
+                "Either POS_EMD_INCUDE_CORDS or POS_EMD_INCUDE_FEATURES should be True."
+            )
+
         if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
-            grid_encoder_in_dim = 3
+            grid_encoder_in_dim = 3 if cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS else 0
             if (
                 cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
                 and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
             ):
                 grid_encoder_in_dim += cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
 
-            self.grid_encoder = extensions.grid_encoder.GridEncoder(
+            self.pos_encoder = extensions.grid_encoder.GridEncoder(
                 in_channels=grid_encoder_in_dim,
                 n_levels=cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS,
                 lvl_channels=cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM,
@@ -45,6 +53,8 @@ class GanCraftGenerator(torch.nn.Module):
                 if cfg.NETWORK.GANCRAFT.BUILDING_MODE
                 else cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
             )
+        elif cfg.NETWORK.GANCRAFT.POS_EMD == "SIN_COS":
+            self.pos_encoder = SinCosEncoder(cfg)
 
         if cfg.NETWORK.GANCRAFT.RENDER_USE_SIREN:
             self.render_net = RenderSIREN(cfg)
@@ -144,7 +154,7 @@ class GanCraftGenerator(torch.nn.Module):
             mc_masks_onehot.scatter_(-1, mc_masks, 1.0)
 
         net_out_s, net_out_c = self._forward_perpix_sub(
-            features, normalized_cord, z, mc_masks_onehot, raydirs
+            features, normalized_cord, z, mc_masks_onehot
         )
         # Blending
         weights = self._volum_rendering_relu(
@@ -335,9 +345,7 @@ class GanCraftGenerator(torch.nn.Module):
         )
         return cumsum
 
-    def _forward_perpix_sub(
-        self, features, normalized_cord, z, mc_masks_onehot, raydirs
-    ):
+    def _forward_perpix_sub(self, features, normalized_cord, z, mc_masks_onehot):
         r"""Forwarding the MLP.
 
         Args:
@@ -345,7 +353,6 @@ class GanCraftGenerator(torch.nn.Module):
             normalized_cord (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
             z (N x C3 tensor): Intermediate style vectors.
             mc_masks_onehot (N x H x W x L x C4): One-hot segmentation maps.
-            raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
         Returns:
             net_out_s (N x H x W x L x 1 tensor): Opacities.
             net_out_c (N x H x W x L x C5 tensor): Color embeddings.
@@ -367,45 +374,37 @@ class GanCraftGenerator(torch.nn.Module):
                 normalized_cord.size(3),
                 1,
             )
-            feature_in = torch.cat([feature_in, features], dim=-1)
+            feature_in = torch.cat([features, feature_in], dim=-1)
         elif self.cfg.NETWORK.GANCRAFT.ENCODER == "LOCAL":
             raise NotImplementedError
 
-        if self.cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
-            if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
-                feature_in = self.grid_encoder(
+        if self.cfg.NETWORK.GANCRAFT.POS_EMD in ["HASH_GRID", "SIN_COS"]:
+            if (
+                self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+                and self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+            ):
+                feature_in = self.pos_encoder(
                     torch.cat([normalized_cord, feature_in], dim=-1)
                 )
-            else:
+            elif self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS:
                 feature_in = torch.cat(
-                    [self.grid_encoder(normalized_cord), feature_in], dim=-1
+                    [self.pos_encoder(normalized_cord), feature_in], dim=-1
                 )
-        elif self.cfg.NETWORK.GANCRAFT.POS_EMD == "SINE_COSINE":
-            freq_bands = 2.0 ** torch.linspace(
-                0,
-                self.cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS - 1,
-                steps=self.cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS,
-            )
-            if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
-                normalized_cord = torch.cat([normalized_cord, feature_in], dim=-1)
-
-            cord_sin = torch.cat(
-                [torch.sin(normalized_cord * fb) for fb in freq_bands], dim=-1
-            )
-            cord_cos = torch.cat(
-                [torch.cos(normalized_cord * fb) for fb in freq_bands], dim=-1
-            )
-            if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
-                feature_in = torch.cat([cord_sin, cord_cos], dim=-1)
-            else:
-                feature_in = torch.cat([cord_sin, cord_cos, feature_in], dim=-1)
+            elif self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                # Ignore normalized_cord here to make it decoupled with coordinates
+                feature_in = torch.cat([self.pos_encoder(feature_in)], dim=-1)
         else:
-            if self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+            if (
+                self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+                and self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+            ):
                 feature_in = torch.cat([normalized_cord, feature_in], dim=-1)
-            else:
+            elif self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS:
                 feature_in = normalized_cord
+            elif self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                feature_in = feature_in
 
-        net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot, raydirs)
+        net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot)
         return net_out_s, net_out_c
 
     def _forward_global(self, net_out, z):
@@ -466,31 +465,67 @@ class GlobalEncoder(torch.nn.Module):
         return cond
 
 
+class SinCosEncoder(torch.nn.Module):
+    def __init__(self, cfg):
+        super(SinCosEncoder, self).__init__()
+        self.freq_bands = 2.0 ** torch.linspace(
+            0,
+            cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS - 1,
+            steps=cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS,
+        )
+
+    def forward(self, features):
+        cord_sin = torch.cat(
+            [torch.sin(features * fb) for fb in self.freq_bands], dim=-1
+        )
+        cord_cos = torch.cat(
+            [torch.cos(features * fb) for fb in self.freq_bands], dim=-1
+        )
+        return torch.cat([cord_sin, cord_cos], dim=-1)
+
+
 class RenderMLP(torch.nn.Module):
     r"""MLP with affine modulation."""
 
     def __init__(self, cfg):
         super(RenderMLP, self).__init__()
-        include_features = cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
-        if cfg.NETWORK.GANCRAFT.POS_EMD in ["HASH_GRID", "SINE_COSINE"]:
-            include_features &= not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-        else:
-            include_features &= cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-
-        in_dim = cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM if include_features else 0
+        in_dim = 0
+        f_dim = (
+            cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
+            if cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+            else 0
+        )
         if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
-            in_dim += (
+            in_dim = (
                 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
                 * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
             )
-        elif cfg.NETWORK.GANCRAFT.POS_EMD == "SINE_COSINE":
             in_dim += (
-                cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
-                * (cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM + 3 if include_features else 3)
-                * 2
+                f_dim
+                if cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+                and not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+                else 0
             )
+        elif cfg.NETWORK.GANCRAFT.POS_EMD == "SIN_COS":
+            if (
+                cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+                and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+            ):
+                in_dim = (3 + f_dim) * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2
+            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS:
+                in_dim = 3 * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2 + f_dim
+            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                in_dim = f_dim * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2
         else:
-            in_dim += 3
+            if (
+                cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+                and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+            ):
+                in_dim = 3 + f_dim
+            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS:
+                in_dim = 3
+            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                in_dim = f_dim
 
         self.fc_m_a = torch.nn.Linear(
             cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
@@ -553,7 +588,7 @@ class RenderMLP(torch.nn.Module):
         )
         self.act = torch.nn.LeakyReLU(negative_slope=0.2)
 
-    def forward(self, x, z, m, _):
+    def forward(self, x, z, m):
         r"""Forward network
 
         Args:
@@ -585,26 +620,43 @@ class RenderSIREN(torch.nn.Module):
     def __init__(self, cfg):
         super(RenderSIREN, self).__init__()
         self.cfg = cfg
-        include_features = cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
-        if cfg.NETWORK.GANCRAFT.POS_EMD in ["HASH_GRID", "SINE_COSINE"]:
-            include_features &= not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-        else:
-            include_features &= cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-
-        in_dim = cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM if include_features else 0
+        in_dim = 0
+        f_dim = (
+            cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
+            if cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
+            else 0
+        )
         if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
-            in_dim += (
+            in_dim = (
                 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
                 * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
             )
-        elif cfg.NETWORK.GANCRAFT.POS_EMD == "SINE_COSINE":
             in_dim += (
-                cfg.NETWORK.GANCRAFT.SINE_COSINE_FREQ_BENDS
-                * (cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM + 3 if include_features else 3)
-                * 2
+                f_dim
+                if cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+                and not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+                else 0
             )
+        elif cfg.NETWORK.GANCRAFT.POS_EMD == "SIN_COS":
+            if (
+                cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+                and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+            ):
+                in_dim = (3 + f_dim) * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2
+            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS:
+                in_dim = 3 * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2 + f_dim
+            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                in_dim = f_dim * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2
         else:
-            in_dim += 3
+            if (
+                cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
+                and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
+            ):
+                in_dim = 3 + f_dim
+            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS:
+                in_dim = 3
+            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
+                in_dim = f_dim
 
         self.film_m = FiLMLayer(
             cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
@@ -647,10 +699,6 @@ class RenderSIREN(torch.nn.Module):
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA,
         )
-        self.film_rgb = FiLMLayer(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM + 3,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
         self.fc_rgb = torch.nn.Linear(
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR,
@@ -674,7 +722,7 @@ class RenderSIREN(torch.nn.Module):
             torch.nn.Linear(
                 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
                 (cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM * 2)
-                * (len(self.film_layers) + 2),
+                * (len(self.film_layers) + 1),
             ),
         )
         self._init_weights()
@@ -703,7 +751,6 @@ class RenderSIREN(torch.nn.Module):
             self.film_m.apply(film_init)
             self.film_layers.apply(film_init)
             self.fc_sigma.apply(film_init)
-            self.film_rgb.apply(film_init)
             self.fc_rgb.apply(film_init)
         # Initialize the first FiLM layer
         first_film_init = (
@@ -714,10 +761,9 @@ class RenderSIREN(torch.nn.Module):
         with torch.no_grad():
             self.film_layers[0].apply(first_film_init)
 
-    def forward(self, x, z, m, raydirs):
+    def forward(self, x, z, m):
         # print(x.size())       # torch.Size([N, H, W, n_samples, ?])
         # print(m.size())       # torch.Size([N, H, W, n_samples, n_classes])
-        # print(raydirs.size()) # torch.Size([N, H, W, 1, 3])
         frequencies = self.mapper(z)
         freq_dim = frequencies.size(1) // 2
         phase_shifts = frequencies[:, None, None, None, freq_dim:]
@@ -735,17 +781,11 @@ class RenderSIREN(torch.nn.Module):
             if i == 0:
                 x = x + self.film_m(
                     m,
-                    frequencies[..., -2 * hidden_dim : -hidden_dim],
-                    phase_shifts[..., -2 * hidden_dim : -hidden_dim],
+                    frequencies[..., -hidden_dim],
+                    phase_shifts[..., -hidden_dim],
                 )
 
         sigma = self.fc_sigma(x)
-        raydirs = raydirs.repeat(1, 1, 1, x.size(3), 1)
-        c = self.film_rgb(
-            torch.cat([raydirs, x], dim=-1),
-            frequencies[..., -hidden_dim:],
-            phase_shifts[..., -hidden_dim:],
-        )
         c = self.fc_rgb(c)
         # print(sigma.size()) # torch.Size([N, H, W, n_samples, 1])
         # print(c.size())     # torch.Size([N, H, W, n_samples, 3])
