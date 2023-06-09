@@ -4,11 +4,9 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-09 11:21:25
+# @Last Modified at: 2023-06-09 16:24:09
 # @Email:  root@haozhexie.com
-# @Ref:
-# - https://github.com/FrozenBurning/SceneDreamer
-# - https://github.com/marcoamonteiro/pi-GAN/
+# @Ref: https://github.com/FrozenBurning/SceneDreamer
 
 import numpy as np
 import torch
@@ -22,10 +20,12 @@ class GanCraftGenerator(torch.nn.Module):
     def __init__(self, cfg):
         super(GanCraftGenerator, self).__init__()
         self.cfg = cfg
+        self.render_net = RenderMLP(cfg)
+        self.denoiser = RenderCNN(cfg)
         if cfg.NETWORK.GANCRAFT.ENCODER == "GLOBAL":
             self.encoder = GlobalEncoder(cfg)
         elif cfg.NETWORK.GANCRAFT.ENCODER == "LOCAL":
-            raise NotImplementedError
+            self.encoder = LocalEncoder(cfg)
         else:
             self.encoder = None
 
@@ -55,16 +55,6 @@ class GanCraftGenerator(torch.nn.Module):
             )
         elif cfg.NETWORK.GANCRAFT.POS_EMD == "SIN_COS":
             self.pos_encoder = SinCosEncoder(cfg)
-
-        if cfg.NETWORK.GANCRAFT.RENDER_USE_SIREN:
-            self.render_net = RenderSIREN(cfg)
-        else:
-            self.render_net = RenderMLP(cfg)
-
-        if cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR != 3:
-            self.denoiser = RenderCNN(cfg)
-        else:
-            self.denoiser = None
 
     def forward(
         self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None, z=None
@@ -128,7 +118,7 @@ class GanCraftGenerator(torch.nn.Module):
             sky_only_mask = voxel_id[:, :, :, [0], :] == 0
 
         with torch.no_grad():
-            normalized_cord, new_dists, new_idx = self._get_normalized_coordinates(
+            normalized_cord, new_dists, new_idx = self._get_sampled_coordinates(
                 self.cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY,
                 depth2,
                 raydirs,
@@ -170,7 +160,7 @@ class GanCraftGenerator(torch.nn.Module):
         net_out = net_out - 1
         return net_out
 
-    def _get_normalized_coordinates(
+    def _get_sampled_coordinates(
         self, n_samples, depth2, raydirs, cam_ori_t, building_stats=None
     ):
         # Random sample points along the ray
@@ -184,7 +174,7 @@ class GanCraftGenerator(torch.nn.Module):
         nan_mask = torch.isnan(rand_depth)
         inf_mask = torch.isinf(rand_depth)
         rand_depth[nan_mask | inf_mask] = 0.0
-        worldcoord2 = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
+        world_coord = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
         # assert worldcoord2.shape[-1] == 3
         if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
             assert building_stats is not None
@@ -194,14 +184,18 @@ class GanCraftGenerator(torch.nn.Module):
                 - self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
             ) / 2
             building_stats = building_stats[:, None, None, None, :].repeat(
-                1, worldcoord2.size(1), worldcoord2.size(2), worldcoord2.size(3), 1
+                1, world_coord.size(1), world_coord.size(2), world_coord.size(3), 1
             )
-            worldcoord2[..., 0] -= building_stats[..., 0] + center_offset
-            worldcoord2[..., 1] -= building_stats[..., 1] + center_offset
+            world_coord[..., 0] -= building_stats[..., 0] + center_offset
+            world_coord[..., 1] -= building_stats[..., 1] + center_offset
             # TODO: Fix non-building rays
             zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
-            worldcoord2[zero_rd_mask == 0] = 0
+            world_coord[zero_rd_mask == 0] = 0
 
+        normalized_cord = self._get_normalized_coordinates(world_coord)
+        return normalized_cord, new_dists, new_idx
+
+    def _get_normalized_coordinates(self, world_coord):
         if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
             h, w, d = (
                 self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
@@ -215,8 +209,8 @@ class GanCraftGenerator(torch.nn.Module):
                 self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
             )
 
-        delimeter = torch.tensor([h, w, d], device=worldcoord2.device)
-        normalized_cord = worldcoord2 / delimeter * 2 - 1
+        delimeter = torch.tensor([h, w, d], device=world_coord.device)
+        normalized_cord = world_coord / delimeter * 2 - 1
         # TODO: Temporary fix
         normalized_cord[normalized_cord > 1] = 1
         normalized_cord[normalized_cord < -1] = -1
@@ -224,7 +218,7 @@ class GanCraftGenerator(torch.nn.Module):
         # assert (normalized_cord >= -1).all()
         # print(delimeter, torch.min(normalized_cord), torch.max(normalized_cord))
         # print(normalized_cord.size())   # torch.Size([1, 192, 192, 24, 3])
-        return normalized_cord, new_dists, new_idx
+        return normalized_cord
 
     def _sample_depth_batched(
         self,
@@ -349,8 +343,8 @@ class GanCraftGenerator(torch.nn.Module):
         r"""Forwarding the MLP.
 
         Args:
-            features (N x C1 tensor): Local features determined by the current pixel.
-            normalized_cord (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
+            features (N x C1 x ...? tensor): Local features determined by the current pixel.
+            normalized_coord (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
             z (N x C3 tensor): Intermediate style vectors.
             mc_masks_onehot (N x H x W x L x C4): One-hot segmentation maps.
         Returns:
@@ -367,16 +361,38 @@ class GanCraftGenerator(torch.nn.Module):
         )
         if self.cfg.NETWORK.GANCRAFT.ENCODER == "GLOBAL":
             # print(features.size())  # torch.Size([N, ENCODER_OUT_DIM])
-            features = features[:, None, None, None, :].repeat(
+            feature_in = features[:, None, None, None, :].repeat(
                 1,
                 normalized_cord.size(1),
                 normalized_cord.size(2),
                 normalized_cord.size(3),
                 1,
             )
-            feature_in = torch.cat([features, feature_in], dim=-1)
         elif self.cfg.NETWORK.GANCRAFT.ENCODER == "LOCAL":
-            raise NotImplementedError
+            # print(features.size())    # torch.Size([N, ENCODER_OUT_DIM - 1, H, W])
+            # print(world_coord.size()) # torch.Size([N, H, W, L, 3])
+            # NOTE: grid specifies the sampling pixel locations normalized by the input spatial
+            # dimensions. Therefore, it should have most values in the range of [-1, 1].
+            grid = normalized_cord.permute(0, 3, 1, 2, 4).reshape(
+                -1, normalized_cord.size(1), normalized_cord.size(2), 3
+            )
+            # print(grid.size())        # torch.Size([N * L, H, W, 3])
+            feature_in = F.grid_sample(
+                features.repeat(grid.size(0), 1, 1, 1),
+                grid[..., [1, 0]],
+                align_corners=False,
+            )
+            # print(feature_in.size())  # torch.Size([N * L, ENCODER_OUT_DIM - 1, H, W])
+            feature_in = feature_in.reshape(
+                normalized_cord.size(0),
+                normalized_cord.size(3),
+                feature_in.size(1),
+                feature_in.size(2),
+                feature_in.size(3),
+            ).permute(0, 3, 4, 1, 2)
+            # print(feature_in.size())  # torch.Size([N, H, W, L, ENCODER_OUT_DIM - 1])
+            feature_in = torch.cat([feature_in, normalized_cord[..., [2]]], dim=-1)
+            # print(feature_in.size())  # torch.Size([N, H, W, L, ENCODER_OUT_DIM])
 
         if self.cfg.NETWORK.GANCRAFT.POS_EMD in ["HASH_GRID", "SIN_COS"]:
             if (
@@ -439,7 +455,7 @@ class GlobalEncoder(torch.nn.Module):
         )
         conv_blocks = []
         cur_hidden_channels = 16
-        for _ in range(1, cfg.NETWORK.GANCRAFT.ENCODER_N_BLOCKS):
+        for _ in range(1, cfg.NETWORK.GANCRAFT.GLOBAL_ENCODER_N_BLOCKS):
             conv_blocks.append(
                 SRTConvBlock(in_channels=cur_hidden_channels, out_channels=None)
             )
@@ -453,16 +469,64 @@ class GlobalEncoder(torch.nn.Module):
     def forward(self, hf_seg):
         hf = self.act(self.hf_conv(hf_seg[:, [0]]))
         seg = self.act(self.seg_conv(hf_seg[:, 1:]))
-        joint = torch.cat([hf, seg], dim=1)
+        out = torch.cat([hf, seg], dim=1)
         for layer in self.conv_blocks:
-            out = self.act(layer(joint))
-            joint = out
+            out = self.act(layer(out))
 
         out = out.permute(0, 2, 3, 1)
         out = torch.mean(out.reshape(out.shape[0], -1, out.shape[-1]), dim=1)
         cond = self.act(self.fc1(out))
         cond = torch.tanh(self.fc2(cond))
         return cond
+
+
+class LocalEncoder(torch.nn.Module):
+    def __init__(self, cfg):
+        super(LocalEncoder, self).__init__()
+        n_classes = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
+        self.hf_conv = torch.nn.Conv2d(1, 32, kernel_size=7, stride=2, padding=3)
+        self.seg_conv = torch.nn.Conv2d(
+            n_classes, 32, kernel_size=7, stride=2, padding=3
+        )
+        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM == "BATCH_NORM":
+            self.bn1 = torch.nn.BatchNorm2d(64)
+        elif cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM == "GROUP_NORM":
+            self.bn1 = torch.nn.GroupNorm(32, 64)
+        else:
+            raise ValueError(
+                "Unknown normalization: %s" % cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM
+            )
+        self.conv2 = ResConvBlock(64, 128, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.conv3 = ResConvBlock(128, 256, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.conv4 = ResConvBlock(256, 512, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.dconv5 = torch.nn.ConvTranspose2d(
+            512, 128, kernel_size=4, stride=2, padding=1
+        )
+        self.dconv6 = torch.nn.ConvTranspose2d(
+            128, 32, kernel_size=4, stride=2, padding=1
+        )
+        self.dconv7 = torch.nn.Conv2d(
+            32, cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM - 1, kernel_size=1
+        )
+
+    def forward(self, hf_seg):
+        hf = self.hf_conv(hf_seg[:, [0]])
+        seg = self.seg_conv(hf_seg[:, 1:])
+        out = F.relu(self.bn1(torch.cat([hf, seg], dim=1)), inplace=True)
+        # print(out.size())   # torch.Size([N, 64, H/2, W/2])
+        out = F.avg_pool2d(self.conv2(out), 2, stride=2)
+        # print(out.size())   # torch.Size([N, 128, H/4, W/4])
+        out = self.conv3(out)
+        # print(out.size())   # torch.Size([N, 256, H/4, W/4])
+        out = self.conv4(out)
+        # print(out.size())   # torch.Size([N, 512, H/4, W/4])
+        out = self.dconv5(out)
+        # print(out.size())   # torch.Size([N, 128, H/2, W/2])
+        out = self.dconv6(out)
+        # print(out.size())   # torch.Size([N, 32, H, W])
+        out = self.dconv7(out)
+        # print(out.size())   # torch.Size([N, OUT_DIM - 1, H, W])
+        return torch.tanh(out)
 
 
 class SinCosEncoder(torch.nn.Module):
@@ -614,194 +678,6 @@ class RenderMLP(torch.nn.Module):
         return sigma, c
 
 
-class RenderSIREN(torch.nn.Module):
-    r"""Primary SIREN  architecture used in pi-GAN generators."""
-
-    def __init__(self, cfg):
-        super(RenderSIREN, self).__init__()
-        self.cfg = cfg
-        in_dim = 0
-        f_dim = (
-            cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM
-            if cfg.NETWORK.GANCRAFT.ENCODER in ["GLOBAL", "LOCAL"]
-            else 0
-        )
-        if cfg.NETWORK.GANCRAFT.POS_EMD == "HASH_GRID":
-            in_dim = (
-                cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS
-                * cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM
-            )
-            in_dim += (
-                f_dim
-                if cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
-                and not cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-                else 0
-            )
-        elif cfg.NETWORK.GANCRAFT.POS_EMD == "SIN_COS":
-            if (
-                cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
-                and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-            ):
-                in_dim = (3 + f_dim) * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2
-            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS:
-                in_dim = 3 * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2 + f_dim
-            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
-                in_dim = f_dim * cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS * 2
-        else:
-            if (
-                cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS
-                and cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES
-            ):
-                in_dim = 3 + f_dim
-            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS:
-                in_dim = 3
-            elif cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
-                in_dim = f_dim
-
-        self.film_m = FiLMLayer(
-            cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
-        self.film_layers = torch.nn.ModuleList(
-            [
-                FiLMLayer(in_dim, cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM),
-                FiLMLayer(
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                ),
-                FiLMLayer(
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                ),
-                FiLMLayer(
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                ),
-                FiLMLayer(
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                ),
-                FiLMLayer(
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                ),
-                FiLMLayer(
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                ),
-                FiLMLayer(
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                    cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                ),
-            ]
-        )
-        self.fc_sigma = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA,
-        )
-        self.fc_rgb = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR,
-        )
-        self.mapper = torch.nn.Sequential(
-            torch.nn.Linear(
-                cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            ),
-            torch.nn.LeakyReLU(0.2, inplace=True),
-            torch.nn.Linear(
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            ),
-            torch.nn.LeakyReLU(0.2, inplace=True),
-            torch.nn.Linear(
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            ),
-            torch.nn.LeakyReLU(0.2, inplace=True),
-            torch.nn.Linear(
-                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-                (cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM * 2)
-                * (len(self.film_layers) + 1),
-            ),
-        )
-        self._init_weights()
-
-    def _init_weights(self):
-        # Initialize the FC layers in mapper
-        kaiming_init = (
-            lambda m: torch.nn.init.kaiming_normal_(
-                m.weight, a=0.2, mode="fan_in", nonlinearity="leaky_relu"
-            )
-            if isinstance(m, torch.nn.Linear)
-            else None
-        )
-        with torch.no_grad():
-            self.mapper.apply(kaiming_init)
-        # Initialize the FiLM layers
-        film_init = (
-            lambda m: m.weight.uniform_(
-                -np.sqrt(6 / m.weight.size(-1)) / 25,
-                np.sqrt(6 / m.weight.size(-1)) / 25,
-            )
-            if isinstance(m, torch.nn.Linear)
-            else None
-        )
-        with torch.no_grad():
-            self.film_m.apply(film_init)
-            self.film_layers.apply(film_init)
-            self.fc_sigma.apply(film_init)
-            self.fc_rgb.apply(film_init)
-        # Initialize the first FiLM layer
-        first_film_init = (
-            lambda m: m.weight.uniform_(-1 / m.weight.size(-1), 1 / m.weight.size(-1))
-            if isinstance(m, torch.nn.Linear)
-            else None
-        )
-        with torch.no_grad():
-            self.film_layers[0].apply(first_film_init)
-
-    def forward(self, x, z, m):
-        # print(x.size())       # torch.Size([N, H, W, n_samples, ?])
-        # print(m.size())       # torch.Size([N, H, W, n_samples, n_classes])
-        frequencies = self.mapper(z)
-        freq_dim = frequencies.size(1) // 2
-        phase_shifts = frequencies[:, None, None, None, freq_dim:]
-        frequencies = frequencies[:, None, None, None, :freq_dim]
-        frequencies = frequencies * 15 + 30
-
-        hidden_dim = self.cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM
-        for i, fl in enumerate(self.film_layers):
-            freq_offset = i * hidden_dim
-            x = fl(
-                x,
-                frequencies[..., freq_offset : freq_offset + hidden_dim],
-                phase_shifts[..., freq_offset : freq_offset + hidden_dim],
-            )
-            if i == 0:
-                x = x + self.film_m(
-                    m,
-                    frequencies[..., -hidden_dim],
-                    phase_shifts[..., -hidden_dim],
-                )
-
-        sigma = self.fc_sigma(x)
-        c = self.fc_rgb(c)
-        # print(sigma.size()) # torch.Size([N, H, W, n_samples, 1])
-        # print(c.size())     # torch.Size([N, H, W, n_samples, 3])
-        return sigma, c
-
-
-class FiLMLayer(torch.nn.Module):
-    def __init__(self, input_dim, hidden_dim):
-        super().__init__()
-        self.layer = torch.nn.Linear(input_dim, hidden_dim)
-
-    def forward(self, x, freq, phase_shift):
-        x = self.layer(x)
-        return torch.sin(freq * x + phase_shift)
-
-
 class RenderCNN(torch.nn.Module):
     r"""CNN converting intermediate feature map to final image."""
 
@@ -930,6 +806,87 @@ class SRTConvBlock(torch.nn.Module):
         return self.layers(x)
 
 
+class ResConvBlock(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, norm, bias=False):
+        super(ResConvBlock, self).__init__()
+        # conv3x3(in_planes, int(out_planes / 2))
+        self.conv1 = torch.nn.Conv2d(
+            in_channels,
+            out_channels // 2,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=bias,
+        )
+        # conv3x3(int(out_planes / 2), int(out_planes / 4))
+        self.conv2 = torch.nn.Conv2d(
+            out_channels // 2,
+            out_channels // 4,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=bias,
+        )
+        # conv3x3(int(out_planes / 4), int(out_planes / 4))
+        self.conv3 = torch.nn.Conv2d(
+            out_channels // 4,
+            out_channels // 4,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=bias,
+        )
+        if norm == "BATCH_NORM":
+            self.bn1 = torch.nn.BatchNorm2d(in_channels)
+            self.bn2 = torch.nn.BatchNorm2d(out_channels // 2)
+            self.bn3 = torch.nn.BatchNorm2d(out_channels // 4)
+            self.bn4 = torch.nn.BatchNorm2d(in_channels)
+        elif norm == "GROUP_NORM":
+            self.bn1 = torch.nn.GroupNorm(32, in_channels)
+            self.bn2 = torch.nn.GroupNorm(32, out_channels // 2)
+            self.bn3 = torch.nn.GroupNorm(32, out_channels // 4)
+            self.bn4 = torch.nn.GroupNorm(32, in_channels)
+
+        if in_channels != out_channels:
+            self.downsample = torch.nn.Sequential(
+                self.bn4,
+                torch.nn.ReLU(True),
+                torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=1, bias=False
+                ),
+            )
+        else:
+            self.downsample = None
+
+    def forward(self, x):
+        residual = x
+        # print(residual.size())      # torch.Size([N, 64, H, W])
+        out1 = self.bn1(x)
+        out1 = F.relu(out1, True)
+        out1 = self.conv1(out1)
+        # print(out1.size())          # torch.Size([N, 64, H, W])
+        out2 = self.bn2(out1)
+        out2 = F.relu(out2, True)
+        out2 = self.conv2(out2)
+        # print(out2.size())          # torch.Size([N, 32, H, W])
+        out3 = self.bn3(out2)
+        out3 = F.relu(out3, True)
+        out3 = self.conv3(out3)
+        # print(out3.size())          # torch.Size([N, 32, H, W])
+        out3 = torch.cat((out1, out2, out3), dim=1)
+        # print(out3.size())          # torch.Size([N, 128, H, W])
+        if self.downsample is not None:
+            residual = self.downsample(residual)
+            # print(residual.size())  # torch.Size([N, 128, H, W])
+        out3 += residual
+        return out3
+
+
+class HourGlassBlock(torch.nn.Module):
+    def __init__(self):
+        super(HourGlassBlock, self).__init__()
+
+
 class ModLinear(torch.nn.Module):
     r"""Linear layer with affine modulation (Based on StyleGAN2 mod demod).
     Equivalent to affine modulation following linear, but faster when the same modulation parameters are shared across
@@ -1031,66 +988,6 @@ class ModLinear(torch.nn.Module):
             x = torch.baddbmm(b, x, w.transpose(1, 2))
         else:
             x = x.bmm(w.transpose(1, 2))
-        x = x.reshape(*x_shape[:-1], x.shape[-1])
-        return x
-
-
-class AffineMod(torch.nn.Module):
-    r"""Learning affine modulation of activation.
-
-    Args:
-        in_features (int): Number of input features.
-        style_features (int): Number of style features.
-        mod_bias (bool): Whether to modulate bias.
-    """
-
-    def __init__(self, in_features, style_features, mod_bias=True):
-        super(AffineMod, self).__init__()
-        self.weight_alpha = torch.nn.Parameter(
-            torch.randn([in_features, style_features]) / np.sqrt(style_features)
-        )
-        self.bias_alpha = torch.nn.Parameter(
-            torch.full([in_features], 1, dtype=torch.float)
-        )  # init to 1
-        self.weight_beta = None
-        self.bias_beta = None
-        self.mod_bias = mod_bias
-        if mod_bias:
-            self.weight_beta = torch.nn.Parameter(
-                torch.randn([in_features, style_features]) / np.sqrt(style_features)
-            )
-            self.bias_beta = torch.nn.Parameter(
-                torch.full([in_features], 0, dtype=torch.float)
-            )
-
-    @staticmethod
-    def _linear_f(x, w, b):
-        w = w.to(x.dtype)
-        x_shape = x.shape
-        x = x.reshape(-1, x_shape[-1])
-        if b is not None:
-            b = b.to(x.dtype)
-            x = torch.addmm(b.unsqueeze(0), x, w.t())
-        else:
-            x = x.matmul(w.t())
-        x = x.reshape(*x_shape[:-1], -1)
-        return x
-
-    # x: B, ...   , Cin
-    # z: B, 1, 1, , Cz
-    def forward(self, x, z):
-        x_shape = x.shape
-        z_shape = z.shape
-        x = x.reshape(x_shape[0], -1, x_shape[-1])
-        z = z.reshape(z_shape[0], 1, z_shape[-1])
-
-        alpha = self._linear_f(z, self.weight_alpha, self.bias_alpha)  # [B, ..., I]
-        x = x * alpha
-
-        if self.mod_bias:
-            beta = self._linear_f(z, self.weight_beta, self.bias_beta)  # [B, ..., I]
-            x = x + beta
-
         x = x.reshape(*x_shape[:-1], x.shape[-1])
         return x
 

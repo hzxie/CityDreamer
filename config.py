@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-09 11:22:23
+# @Last Modified at: 2023-06-09 16:26:19
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -101,15 +101,15 @@ cfg.NETWORK.GANCRAFT.STYLE_DIM                   = 128
 cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY     = 24
 cfg.NETWORK.GANCRAFT.DIST_SCALE                  = 0.25
 cfg.NETWORK.GANCRAFT.ENCODER                     = "GLOBAL"
-cfg.NETWORK.GANCRAFT.ENCODER_N_BLOCKS            = 6
 cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM             = 2
+cfg.NETWORK.GANCRAFT.GLOBAL_ENCODER_N_BLOCKS     = 6
+cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM          = "GROUP_NORM"
 cfg.NETWORK.GANCRAFT.POS_EMD                     = "HASH_GRID"
 cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES     = True
 cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS        = True
 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS          = 16
 cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM         = 8
 cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS          = 10
-cfg.NETWORK.GANCRAFT.RENDER_USE_SIREN            = False
 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM           = 256
 cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM            = 256
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA        = 1
