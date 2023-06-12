@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-27 19:15:08
+# @Last Modified at: 2023-06-12 19:39:22
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -363,12 +363,12 @@ def _get_instance_seg_map(seg_map, contours, use_contours=False):
     return seg_map.astype(np.int32), stats[:, :4]
 
 
-def _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t):
+def _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_origin):
     mc_rgb = np.array(seg_map.convert("RGB"))
     # Diffused shading, co-located light.
     first_intersection_depth = depth2[0, :, :, 0, None, :]
     first_intersection_point = (
-        raydirs * first_intersection_depth + cam_ori_t[None, None, None, :]
+        raydirs * first_intersection_depth + cam_origin[None, None, None, :]
     )
     fip_local_coords = torch.remainder(first_intersection_point, 1.0)
     fip_wall_proximity = torch.minimum(fip_local_coords, 1.0 - fip_local_coords)
@@ -488,7 +488,7 @@ def get_google_earth_aligned_seg_maps(
         Note: voxel_id = 0 and depth2 = NaN if there is no intersection along the ray
         Args:
             voxel_t (H x W x D tensor, int32): Full 3D voxel of MC block IDs.
-            cam_ori_t (3 tensor): Camera origin.
+            cam_origin (3 tensor): Camera origin.
             cam_dir_t (3 tensor): Camera direction.
             cam_up_t (3 tensor): Camera up vector.
             cam_f (float): Camera focal length (in pixels).
@@ -504,7 +504,7 @@ def get_google_earth_aligned_seg_maps(
 
         """
         N_MAX_SAMPLES = 6
-        cam_ori_t = torch.tensor(
+        cam_ori = torch.tensor(
             [
                 gcp["position"]["y"] - tr_cy + vol_cy,
                 gcp["position"]["x"] - tr_cx + vol_cx,
@@ -513,18 +513,19 @@ def get_google_earth_aligned_seg_maps(
             dtype=torch.float32,
             device=seg_volume.device,
         )
+        viewdir = torch.tensor(
+            [
+                cy - gcp["position"]["y"],
+                cx - gcp["position"]["x"],
+                -gcp["position"]["z"],
+            ],
+            dtype=torch.float32,
+            device=seg_volume.device,
+        )
         voxel_id, depth2, raydirs = voxlib.ray_voxel_intersection_perspective(
             seg_volume,
-            cam_ori_t,
-            torch.tensor(
-                [
-                    cy - gcp["position"]["y"],
-                    cx - gcp["position"]["x"],
-                    -gcp["position"]["z"],
-                ],
-                dtype=torch.float32,
-                device=seg_volume.device,
-            ),
+            cam_ori,
+            viewdir,
             torch.tensor([0, 0, 1], dtype=torch.float32),
             # The MAGIC NUMBER to make it aligned with Google Earth Renderings
             ge_camera_focal * 2.06,
@@ -541,7 +542,7 @@ def get_google_earth_aligned_seg_maps(
                 voxel_id.squeeze()[..., 0].cpu().numpy()
             )
             seg_maps.append(
-                _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_ori_t)
+                _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_origin)
             )
         else:
             seg_maps.append(
@@ -549,7 +550,8 @@ def get_google_earth_aligned_seg_maps(
                     "voxel_id": voxel_id.cpu().numpy(),
                     "depth2": depth2.permute(1, 2, 0, 3, 4).cpu().numpy(),
                     "raydirs": raydirs.cpu().numpy(),
-                    "cam_ori_t": cam_ori_t.cpu().numpy(),
+                    "viewdir": viewdir.cpu().numpy(),
+                    "cam_origin": cam_ori.cpu().numpy(),
                     "img_center": {"cx": tr_cx, "cy": tr_cy},
                 }
             )

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-12 14:08:01
+# @Last Modified at: 2023-06-12 19:39:22
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -58,7 +58,7 @@ class GanCraftGenerator(torch.nn.Module):
             self.pos_encoder = SinCosEncoder(cfg)
 
     def forward(
-        self, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats=None, z=None
+        self, hf_seg, voxel_id, depth2, raydirs, cam_origin, building_stats=None, z=None
     ):
         r"""GANcraft Generator forward.
 
@@ -68,7 +68,7 @@ class GanCraftGenerator(torch.nn.Module):
             depth2 (N x H x W x 2 x max_samples x 1 tensor): Depths of entrance and exit points for each ray-voxel
             intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
-            cam_ori_t (N x 3 tensor): Camera origins.
+            cam_origin (N x 3 tensor): Camera origins.
             building_stats (N x 5 tensor): The dy, dx, h, w, ID of the target building. (Only used in building mode)
         Returns:
             fake_images (N x 3 x H x W tensor): fake images
@@ -87,7 +87,7 @@ class GanCraftGenerator(torch.nn.Module):
             features = self.encoder(hf_seg)
 
         net_out = self._forward_perpix(
-            features, voxel_id, depth2, raydirs, cam_ori_t, z, building_stats
+            features, voxel_id, depth2, raydirs, cam_origin, z, building_stats
         )
         fake_images = self._forward_global(net_out, z)
         return fake_images
@@ -98,7 +98,7 @@ class GanCraftGenerator(torch.nn.Module):
         voxel_id,
         depth2,
         raydirs,
-        cam_ori_t,
+        cam_origin,
         z,
         building_stats=None,
     ):
@@ -109,7 +109,7 @@ class GanCraftGenerator(torch.nn.Module):
             voxel_id (N x H x W x M x 1 tensor): Voxel ids from ray-voxel intersection test. M: num intersected voxels
             depth2 (N x H x W x 2 x M x 1 tensor): Depths of entrance and exit points for each ray-voxel intersection.
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
-            cam_ori_t (N x 3 tensor): Camera origins.
+            cam_origin (N x 3 tensor): Camera origins.
             z (N x C3 tensor): Intermediate style vectors.
             building_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
         """
@@ -123,7 +123,7 @@ class GanCraftGenerator(torch.nn.Module):
                 self.cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY,
                 depth2,
                 raydirs,
-                cam_ori_t,
+                cam_origin,
                 building_stats,
             )
             # Generate per-sample segmentation label
@@ -162,7 +162,7 @@ class GanCraftGenerator(torch.nn.Module):
         return net_out
 
     def _get_sampled_coordinates(
-        self, n_samples, depth2, raydirs, cam_ori_t, building_stats=None
+        self, n_samples, depth2, raydirs, cam_origin, building_stats=None
     ):
         # Random sample points along the ray
         rand_depth, new_dists, new_idx = self._sample_depth_batched(
@@ -175,7 +175,7 @@ class GanCraftGenerator(torch.nn.Module):
         nan_mask = torch.isnan(rand_depth)
         inf_mask = torch.isinf(rand_depth)
         rand_depth[nan_mask | inf_mask] = 0.0
-        world_coord = raydirs * rand_depth + cam_ori_t[:, None, None, None, :]
+        world_coord = raydirs * rand_depth + cam_origin[:, None, None, None, :]
         # assert worldcoord2.shape[-1] == 3
         if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
             assert building_stats is not None

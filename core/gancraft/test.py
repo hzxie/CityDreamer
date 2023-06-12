@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-06 16:15:40
+# @Last Modified at: 2023-06-12 19:39:22
 # @Email:  root@haozhexie.com
 
 import logging
@@ -60,14 +60,14 @@ def test(cfg, test_data_loader=None, gancraft=None):
             voxel_id = utils.helpers.var_or_cuda(data["voxel_id"], gancraft.device)
             depth2 = utils.helpers.var_or_cuda(data["depth2"], gancraft.device)
             raydirs = utils.helpers.var_or_cuda(data["raydirs"], gancraft.device)
-            cam_ori_t = utils.helpers.var_or_cuda(data["cam_ori_t"], gancraft.device)
+            cam_origin = utils.helpers.var_or_cuda(data["cam_origin"], gancraft.device)
             footage = utils.helpers.var_or_cuda(data["footage"], gancraft.device)
             building_stats = (
                 None if "building_stats" not in data else data["building_stats"]
             )
 
             fake_imgs = gancraft(
-                hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
+                hf_seg, voxel_id, depth2, raydirs, cam_origin, building_stats
             )
             loss = l1_loss(fake_imgs, footage)
             test_losses.update([loss.item()])

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-06 16:21:44
+# @Last Modified at: 2023-06-12 19:39:22
 # @Email:  root@haozhexie.com
 
 import copy
@@ -170,7 +170,7 @@ def train(cfg):
             voxel_id = utils.helpers.var_or_cuda(data["voxel_id"], gancraft_g.device)
             depth2 = utils.helpers.var_or_cuda(data["depth2"], gancraft_g.device)
             raydirs = utils.helpers.var_or_cuda(data["raydirs"], gancraft_g.device)
-            cam_ori_t = utils.helpers.var_or_cuda(data["cam_ori_t"], gancraft_g.device)
+            cam_origin = utils.helpers.var_or_cuda(data["cam_origin"], gancraft_g.device)
             footages = utils.helpers.var_or_cuda(data["footage"], gancraft_g.device)
             masks = utils.helpers.var_or_cuda(data["mask"], gancraft_g.device)
             if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
@@ -191,7 +191,7 @@ def train(cfg):
 
             with torch.no_grad():
                 fake_imgs = gancraft_g(
-                    hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
+                    hf_seg, voxel_id, depth2, raydirs, cam_origin, building_stats
                 )
                 fake_imgs = fake_imgs.detach()
 
@@ -214,7 +214,7 @@ def train(cfg):
             utils.helpers.requires_grad(gancraft_g, True)
 
             fake_imgs = gancraft_g(
-                hf_seg, voxel_id, depth2, raydirs, cam_ori_t, building_stats
+                hf_seg, voxel_id, depth2, raydirs, cam_origin, building_stats
             )
             fake_labels = gancraft_d(fake_imgs, seg_maps, masks)
             _l1_loss = l1_loss(fake_imgs * masks, footages * masks)

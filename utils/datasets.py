@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-08 19:06:05
+# @Last Modified at: 2023-06-12 19:39:22
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -199,7 +199,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
         data["voxel_id"] = raycasting["voxel_id"]
         data["depth2"] = raycasting["depth2"]
         data["raydirs"] = raycasting["raydirs"]
-        data["cam_ori_t"] = raycasting["cam_ori_t"]
+        data["cam_origin"] = raycasting["cam_origin"]
         data["mask"] = raycasting["mask"]
         data["hf"] = self._get_hf_seg(
             "hf",
@@ -329,7 +329,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                             "voxel_id",
                             "depth2",
                             "raydirs",
-                            "cam_ori_t",
+                            "cam_origin",
                             "footage",
                             "mask",
                         ],
@@ -372,7 +372,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                             "voxel_id",
                             "depth2",
                             "raydirs",
-                            "cam_ori_t",
+                            "cam_origin",
                             "footage",
                             "mask",
                         ],
@@ -411,7 +411,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         data["voxel_id"] = raycasting["voxel_id"]
         data["depth2"] = raycasting["depth2"]
         data["raydirs"] = raycasting["raydirs"]
-        data["cam_ori_t"] = raycasting["cam_ori_t"]
+        data["cam_origin"] = raycasting["cam_origin"]
         data["mask"] = raycasting["mask"]
         # Determine Building Instances
         data["building_id"] = self._get_rnd_building_id(
@@ -533,7 +533,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                             "voxel_id",
                             "depth2",
                             "raydirs",
-                            "cam_ori_t",
+                            "cam_origin",
                             "footage",
                             "mask",
                         ],
@@ -585,7 +585,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                             "voxel_id",
                             "depth2",
                             "raydirs",
-                            "cam_ori_t",
+                            "cam_origin",
                             "footage",
                             "mask",
                         ],
