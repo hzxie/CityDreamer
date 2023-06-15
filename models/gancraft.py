@@ -4,14 +4,13 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-14 18:59:49
+# @Last Modified at: 2023-06-15 15:11:46
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
 import numpy as np
 import torch
 import torch.nn.functional as F
-import torchvision.models
 
 import extensions.grid_encoder
 import extensions.voxlib
@@ -127,25 +126,30 @@ class GanCraftGenerator(torch.nn.Module):
                 building_stats,
             )
             # Generate per-sample segmentation label
-            mc_masks = torch.gather(voxel_id, -2, new_idx)
-            # print(mc_masks.size())  # torch.Size([N, H, W, n_samples + 1, 1])
-            mc_masks = mc_masks.long()
-            mc_masks_onehot = torch.zeros(
+            seg_map_bev = torch.gather(voxel_id, -2, new_idx)
+            # print(seg_map_bev.size())  # torch.Size([N, H, W, n_samples + 1, 1])
+            # In Building Mode, the one more channel is used for building roofs
+            n_seg_map_classes = (
+                self.cfg.DATASETS.OSM_LAYOUT.N_CLASSES + 1
+                if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE
+                else self.cfg.DATASETS.OSM_LAYOUT.N_CLASSES
+            )
+            seg_map_bev_onehot = torch.zeros(
                 [
-                    mc_masks.size(0),
-                    mc_masks.size(1),
-                    mc_masks.size(2),
-                    mc_masks.size(3),
-                    self.cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+                    seg_map_bev.size(0),
+                    seg_map_bev.size(1),
+                    seg_map_bev.size(2),
+                    seg_map_bev.size(3),
+                    n_seg_map_classes,
                 ],
                 dtype=torch.float,
                 device=voxel_id.device,
             )
-            # print(mc_masks_onehot.size())  # torch.Size([N, H, W, n_samples + 1, 1])
-            mc_masks_onehot.scatter_(-1, mc_masks, 1.0)
+            # print(seg_map_bev_onehot.size())  # torch.Size([N, H, W, n_samples + 1, 1])
+            seg_map_bev_onehot.scatter_(-1, seg_map_bev.long(), 1.0)
 
         net_out_s, net_out_c = self._forward_perpix_sub(
-            features, normalized_cord, z, mc_masks_onehot
+            features, normalized_cord, z, seg_map_bev_onehot
         )
         # Blending
         weights = self._volum_rendering_relu(
@@ -340,14 +344,14 @@ class GanCraftGenerator(torch.nn.Module):
         )
         return cumsum
 
-    def _forward_perpix_sub(self, features, normalized_cord, z, mc_masks_onehot):
+    def _forward_perpix_sub(self, features, normalized_cord, z, seg_map_bev_onehot):
         r"""Forwarding the MLP.
 
         Args:
             features (N x C1 x ...? tensor): Local features determined by the current pixel.
             normalized_coord (N x H x W x L x 3 tensor): 3D world coordinates of sampled points. L is number of samples; N is batch size, always 1.
             z (N x C3 tensor): Intermediate style vectors.
-            mc_masks_onehot (N x H x W x L x C4): One-hot segmentation maps.
+            seg_map_bev_onehot (N x H x W x L x C4): One-hot segmentation maps.
         Returns:
             net_out_s (N x H x W x L x 1 tensor): Opacities.
             net_out_c (N x H x W x L x C5 tensor): Color embeddings.
@@ -421,7 +425,7 @@ class GanCraftGenerator(torch.nn.Module):
             elif self.cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES:
                 feature_in = feature_in
 
-        net_out_s, net_out_c = self.render_net(feature_in, z, mc_masks_onehot)
+        net_out_s, net_out_c = self.render_net(feature_in, z, seg_map_bev_onehot)
         return net_out_s, net_out_c
 
     def _forward_global(self, net_out, z):
@@ -593,7 +597,9 @@ class RenderMLP(torch.nn.Module):
                 in_dim = f_dim
 
         self.fc_m_a = torch.nn.Linear(
-            cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+            cfg.DATASETS.OSM_LAYOUT.N_CLASSES + 1
+            if cfg.NETWORK.GANCRAFT.BUILDING_MODE
+            else cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             bias=False,
         )

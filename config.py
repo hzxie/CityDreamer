@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-09 16:26:19
+# @Last Modified at: 2023-06-15 15:12:49
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -97,16 +97,17 @@ cfg.NETWORK.SAMPLER.DROPOUT                      = 0.0
 cfg.NETWORK.SAMPLER.TOTAL_STEPS                  = 256
 # GANCraft
 cfg.NETWORK.GANCRAFT                             = EasyDict()
+cfg.NETWORK.GANCRAFT.BUILDING_MODE               = False
 cfg.NETWORK.GANCRAFT.STYLE_DIM                   = 128
 cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY     = 24
 cfg.NETWORK.GANCRAFT.DIST_SCALE                  = 0.25
-cfg.NETWORK.GANCRAFT.ENCODER                     = "GLOBAL"
-cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM             = 2
+cfg.NETWORK.GANCRAFT.ENCODER                     = "LOCAL"
+cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM             = 64 if cfg.NETWORK.GANCRAFT.BUILDING_MODE else 32
 cfg.NETWORK.GANCRAFT.GLOBAL_ENCODER_N_BLOCKS     = 6
 cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM          = "GROUP_NORM"
-cfg.NETWORK.GANCRAFT.POS_EMD                     = "HASH_GRID"
+cfg.NETWORK.GANCRAFT.POS_EMD                     = "SIN_COS"
 cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES     = True
-cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS        = True
+cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS        = False
 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS          = 16
 cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM         = 8
 cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS          = 10
@@ -115,7 +116,6 @@ cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM            = 256
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA        = 1
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR        = 64
 cfg.NETWORK.GANCRAFT.DIS_N_CHANNEL_BASE          = 128
-cfg.NETWORK.GANCRAFT.BUILDING_MODE               = False
 
 #
 # Train
@@ -154,7 +154,7 @@ cfg.TRAIN.GANCRAFT.DISCRIMINATOR_N_WARMUP_ITERS  = 100000
 cfg.TRAIN.GANCRAFT.EPS                           = 1e-7
 cfg.TRAIN.GANCRAFT.WEIGHT_DECAY                  = 0
 cfg.TRAIN.GANCRAFT.BETAS                         = (0., 0.999)
-cfg.TRAIN.GANCRAFT.CROP_SIZE                     = (224, 224)
+cfg.TRAIN.GANCRAFT.CROP_SIZE                     = (192, 192)
 cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_MODEL         = "vgg19"
 cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_LAYERS        = ["relu_3_1", "relu_4_1", "relu_5_1"]
 cfg.TRAIN.GANCRAFT.PERCEPTUAL_LOSS_WEIGHTS       = [0.125, 0.25, 1.0]

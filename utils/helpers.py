@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-16 12:18:10
+# @Last Modified at: 2023-06-15 13:25:25
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -68,7 +68,7 @@ def get_seg_map(seg_map):
 
 
 def get_ins_seg_map_palette(legacy_palette):
-    MAX_N_INSTANCES = 32768
+    MAX_N_INSTANCES = 65536
     palatte = np.random.randint(256, size=(MAX_N_INSTANCES, 3))
     palatte[:7] = legacy_palette[:7]
     return palatte

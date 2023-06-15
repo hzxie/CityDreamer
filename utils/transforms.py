@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-12 20:17:33
+# @Last Modified at: 2023-06-15 15:00:17
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -176,26 +176,33 @@ class CenterCropTarget(RandomCropTarget):
 
 class BuildingMaskRemap(object):
     def __init__(self, parameters, objects):
-        self.src_attr = parameters["src_attr"] if "src_attr" in parameters else None
-        self.dst_value = parameters["dst_value"]
-        self.rest_bld_seg_id = parameters["rest_bld_seg_id"]
+        self.attr = parameters["attr"] if "attr" in parameters else None
+        self.bld_facade_label = parameters["bld_facade_label"]
+        self.bld_roof_label = parameters["bld_roof_label"]
         self.min_bld_ins_id = parameters["min_bld_ins_id"]
         self.objects = objects
 
-    def _building_mask_remap(self, seg_mask, src_value):
-        if src_value is not None:
-            # Preserve a certain building ID
-            # If this value is not specified, all buildings would be removed.
-            seg_mask[seg_mask == src_value] = self.dst_value
+    def _building_mask_remap(self, seg_map, value_map):
+        for src, dst in value_map.items():
+            seg_map[seg_map == src] = dst
 
-        seg_mask[seg_mask >= self.min_bld_ins_id] = self.rest_bld_seg_id
-        return seg_mask
+        seg_map[seg_map >= self.min_bld_ins_id] = 0
+        return seg_map
 
     def __call__(self, data):
         for k, v in data.items():
             if k in self.objects:
-                src_value = data[self.src_attr] if self.src_attr in data else None
-                data[k] = self._building_mask_remap(v, src_value)
+                bld_ins_id = data[self.attr] if self.attr in data else None
+                assert (
+                    bld_ins_id % 2 == 0
+                ), "Building instance ID MUST BE an even number."
+                data[k] = self._building_mask_remap(
+                    v,
+                    {
+                        bld_ins_id: self.bld_facade_label,
+                        bld_ins_id - 1: self.bld_roof_label,
+                    },
+                )
 
         return data
 
@@ -203,16 +210,15 @@ class BuildingMaskRemap(object):
 class MaskRaydirs(object):
     def __init__(self, parameters, objects=None):
         self.VOXEL_ID_KEY = "voxel_id"
-        self.src_attr = parameters["src_attr"]
-        self.target_value = parameters["target_value"]
+        self.RAYDIR_KEY = "raydirs"
+        self.attr = parameters["attr"]
+        self.values = parameters["values"]
         self.objects = objects
 
     def __call__(self, data):
-        for k, v in data.items():
-            if k == self.src_attr:
-                mask = data[self.VOXEL_ID_KEY][..., 0, 0] != self.target_value
-                data[k][mask] = 0
-
+        seg_map = data[self.VOXEL_ID_KEY][..., 0, 0]
+        mask = np.isin(seg_map, self.values)
+        data[self.RAYDIR_KEY][~mask] = 0
         return data
 
 

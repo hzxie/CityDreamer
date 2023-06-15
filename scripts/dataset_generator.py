@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 09:10:16
+# @Last Modified at: 2023-06-15 14:04:17
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -33,6 +33,29 @@ import utils.osm_helper
 import extensions.voxlib as voxlib
 from extensions.extrude_tensor import TensorExtruder
 
+# Global constants
+HEIGHTS = {
+    "ROAD": 4,
+    "GREEN_LANDS": 8,
+    "CONSTRUCTION": 10,
+    "COAST_ZONES": 0,
+}
+CLASSES = {
+    "NULL": 0,
+    "ROAD": 1,
+    "BLD_FACADE": 2,
+    "GREEN_LANDS": 3,
+    "CONSTRUCTION": 4,
+    "COAST_ZONES": 5,
+    "OTHERS": 6,
+    "BLD_ROOF": 7,
+}
+# NOTE: ID > 10 are reserved for building instances.
+# Assume the ID of a facade instance is 2k, the corresponding roof instance is 2k - 1.
+CONSTANTS = {
+    "BLD_INS_LABEL_MIN": 10,
+}
+
 
 def _tag_equals(tags, key, values=None):
     if key not in tags:
@@ -44,11 +67,14 @@ def _tag_equals(tags, key, values=None):
 
 def _get_highway_color(map_name, highway_tags):
     if map_name == "height_field":
-        return 0
+        return HEIGHTS["ROAD"]
     elif map_name == "seg_map":
         # Ignore underground highways
-        return 0 if "layer" in highway_tags and highway_tags["layer"] < 0 else 1
-        # return 1
+        return (
+            CLASSES["NULL"]
+            if "layer" in highway_tags and highway_tags["layer"] < 0
+            else CLASSES["ROAD"]
+        )
     else:
         raise Exception("Unknown map name: %s" % map_name)
 
@@ -65,20 +91,20 @@ def _get_footprint_color(map_name, footprint_tags):
             return None
         elif _tag_equals(footprint_tags, "landuse", ["construction"]):
             #  "building" in footprint_tags and footprint_tags["building"] == "construction"
-            return 10
+            return HEIGHTS["CONSTRUCTION"]
         else:
             raise Exception("Unknown height for tag: %s" % footprint_tags)
     elif map_name == "seg_map":
         if _tag_equals(footprint_tags, "role", ["inner"]):
-            return 2
+            return CLASSES["BLD_FACADE"]
         elif _tag_equals(footprint_tags, "building") or _tag_equals(
             footprint_tags, "building:part"
         ):
-            return 2
+            return CLASSES["BLD_FACADE"]
         elif _tag_equals(footprint_tags, "landuse", ["construction"]):
-            return 4
+            return CLASSES["CONSTRUCTION"]
         else:
-            return 0
+            return CLASSES["NULL"]
     elif map_name == "footprint_contour":
         if _tag_equals(footprint_tags, "building"):
             return 1
@@ -154,9 +180,9 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         )
     else:
         green_lands = get_green_lands(osm_tile_img_path, seg_map)
-        seg_map[green_lands != 0] = 3
+        seg_map[green_lands != 0] = CLASSES["GREEN_LANDS"]
         coast_zones = get_coast_zones(osm_tile_img_path, seg_map.shape)
-        seg_map[coast_zones != 0] = 5
+        seg_map[coast_zones != 0] = CLASSES["COAST_ZONES"]
     # Plot footprint at the end to make building masks more complete
     seg_map = utils.osm_helper.plot_footprints(
         "seg_map",
@@ -167,7 +193,7 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         xy_bounds,
     )
     # Assign ID=6 to unlabelled pixels (regarded as ground)
-    seg_map[seg_map == 0] = 6
+    seg_map[seg_map == 0] = CLASSES["OTHERS"]
 
     # Generate the contours of footprints
     logging.debug("Generating footprint contours ...")
@@ -196,11 +222,11 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     #     xy_bounds,
     #     resolution,
     # )
-    height_field[height_field == 0] = 4
+    height_field[height_field == 0] = HEIGHTS["ROAD"]
     if coast_zones is not None:
-        height_field[coast_zones != 0] = 0
+        height_field[coast_zones != 0] = HEIGHTS["COAST_ZONES"]
     if green_lands is not None:
-        height_field[green_lands != 0] = 8
+        height_field[green_lands != 0] = HEIGHTS["GREEN_LANDS"]
     # Follow the order in plotting seg maps
     height_field = utils.osm_helper.plot_footprints(
         "height_field",
@@ -337,28 +363,26 @@ def _get_img_patch(img, cx, cy, patch_size):
 
 
 def _get_instance_seg_map(seg_map, contours, use_contours=False):
-    BULIDING_MASK_ID = 2
-    BLD_INS_LABEL_MIN = 10
-    N_PIXELS_THRES = 16
     if use_contours:
         _, labels, stats, _ = cv2.connectedComponentsWithStats(
             (1 - contours).astype(np.uint8), connectivity=4
         )
     else:
         _, labels, stats, _ = cv2.connectedComponentsWithStats(
-            (seg_map == BULIDING_MASK_ID).astype(np.uint8), connectivity=4
+            (seg_map == CLASSES["BLD_FACADE"]).astype(np.uint8), connectivity=4
         )
 
     # Remove non-building instance masks
-    labels[seg_map != BULIDING_MASK_ID] = 0
+    labels[seg_map != CLASSES["BLD_FACADE"]] = 0
     # Building instance mask
     building_mask = labels != 0
 
-    # Building Instance Mask starts from 10 (labels + 10)
-    seg_map[seg_map == BULIDING_MASK_ID] = 0
-    seg_map = (
-        seg_map * (1 - building_mask) + (labels + BLD_INS_LABEL_MIN) * building_mask
-    )
+    # Make building instance IDs are even numbers and start from 10
+    # Assume the ID of a facade instance is 2k, the corresponding roof instance is 2k - 1.
+    labels = (labels + CONSTANTS["BLD_INS_LABEL_MIN"]) * 2
+
+    seg_map[seg_map == CLASSES["BLD_FACADE"]] = 0
+    seg_map = seg_map * (1 - building_mask) + labels * building_mask
     assert np.max(labels) < 2147483648
     return seg_map.astype(np.int32), stats[:, :4]
 
@@ -447,13 +471,11 @@ def get_google_earth_aligned_seg_maps(
         patch_size,
     ).astype(np.int32)
     # Recalculate the center offsets of buildings
-    BLD_INS_LABEL_MIN = 10
-    buildings = (
-        np.unique(part_seg_map[part_seg_map > BLD_INS_LABEL_MIN]) - BLD_INS_LABEL_MIN
-    )
+    buildings = np.unique(part_seg_map[part_seg_map > CONSTANTS["BLD_INS_LABEL_MIN"]])
     part_building_stats = {}
     for bid in buildings:
-        _stats = building_stats[bid].copy().astype(np.float32)
+        _bid = bid // 2 - CONSTANTS["BLD_INS_LABEL_MIN"]
+        _stats = building_stats[_bid].copy().astype(np.float32)
         # NOTE: assert building_stats.shape[1] == 4, represents x, y, w, h of the components.
         # Convert x and y to dx and dy, where dx and dy denote the offsets to the center.
         _stats[0] = _stats[0] - tr_cx + _stats[2] / 2
@@ -466,10 +488,21 @@ def get_google_earth_aligned_seg_maps(
         torch.from_numpy(part_hf[None, None, ...]).cuda(),
     ).squeeze()
     logging.debug("The shape of SegVolume: %s" % (seg_volume.size(),))
-    # Convert camera position to the voxel coordinate system
-    vol_cx, vol_cy = ((patch_size - 1) // 2, (patch_size - 1) // 2)
+    # Change the top-level voxel of the "Building Facade" to "Building Roof"
+    roof_seg_map = part_seg_map.copy()
+    non_roof_msk = part_seg_map <= CONSTANTS["BLD_INS_LABEL_MIN"]
+    # Assume the ID of a facade instance is 2k, the corresponding roof instance is 2k - 1.
+    roof_seg_map = roof_seg_map - 1
+    roof_seg_map[non_roof_msk] = part_seg_map[non_roof_msk]
+    seg_volume = seg_volume.scatter_(
+        dim=2,
+        index=torch.from_numpy(part_hf[..., None]).long().cuda(),
+        src=torch.from_numpy(roof_seg_map[..., None]).cuda(),
+    )
 
     seg_maps = []
+    # Convert camera position to the voxel coordinate system
+    vol_cx, vol_cy = ((patch_size - 1) // 2, (patch_size - 1) // 2)
     for gcp in tqdm(ge_camera_poses["poses"], desc="Project: %s" % ge_project_name):
         x, y = utils.osm_helper.lnglat2xy(
             gcp["coordinate"]["longitude"],
@@ -560,10 +593,9 @@ def get_google_earth_aligned_seg_maps(
 
 
 def get_ambiguous_seg_mask(voxel_id, est_seg_map):
-    BULIDING_MASK_ID = 2
-    BLD_INS_LABEL_MIN = 10
     seg_map = voxel_id.squeeze()[..., 0]
-    seg_map[seg_map >= BLD_INS_LABEL_MIN] = BULIDING_MASK_ID
+    # All facade and roof instances are mapped into BLD_FACADE
+    seg_map[seg_map >= CONSTANTS["BLD_INS_LABEL_MIN"]] = CLASSES["BLD_FACADE"]
     est_seg_map = np.array(est_seg_map.convert("P"))
     return seg_map == est_seg_map
 
