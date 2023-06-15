@@ -170,7 +170,9 @@ def train(cfg):
             voxel_id = utils.helpers.var_or_cuda(data["voxel_id"], gancraft_g.device)
             depth2 = utils.helpers.var_or_cuda(data["depth2"], gancraft_g.device)
             raydirs = utils.helpers.var_or_cuda(data["raydirs"], gancraft_g.device)
-            cam_origin = utils.helpers.var_or_cuda(data["cam_origin"], gancraft_g.device)
+            cam_origin = utils.helpers.var_or_cuda(
+                data["cam_origin"], gancraft_g.device
+            )
             footages = utils.helpers.var_or_cuda(data["footage"], gancraft_g.device)
             masks = utils.helpers.var_or_cuda(data["mask"], gancraft_g.device)
             if cfg.NETWORK.GANCRAFT.BUILDING_MODE:

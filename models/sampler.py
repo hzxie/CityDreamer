@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 13:42:48
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 15:15:01
+# @Last Modified at: 2023-06-12 20:57:11
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/samb-t/unleashing-transformers
 
@@ -50,15 +50,21 @@ class AbsorbingDiffusionSampler(torch.nn.Module):
 
         return t, pt, x_0_hat_logits, x_0_ignore
 
-    def sample(self, n_samples, sample_steps, temperature=1.0, device="cuda:0"):
-        x_t = (
-            torch.ones(
-                (n_samples, self.cfg.NETWORK.VQGAN.ATTN_RESOLUTION**2), device=device
-            ).long()
-            * self.cfg.NETWORK.VQGAN.N_EMBED
-        )
-        unmasked = torch.zeros_like(x_t, device=device).bool()
+    def sample(
+        self, n_samples, sample_steps, x_t=None, temperature=1.0, device="cuda:0"
+    ):
         sample_steps = list(range(1, sample_steps + 1))
+        if x_t is None:
+            x_t = (
+                torch.ones(
+                    (n_samples, self.cfg.NETWORK.VQGAN.ATTN_RESOLUTION**2),
+                    device=device,
+                ).long()
+                * self.cfg.NETWORK.VQGAN.N_EMBED
+            )
+            unmasked = torch.zeros_like(x_t, device=device).bool()
+        else:
+            unmasked = x_t == -1
 
         for t in reversed(sample_steps):
             t = torch.full((n_samples,), t, device=device, dtype=torch.long)

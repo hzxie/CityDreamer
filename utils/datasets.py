@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-12 19:39:22
+# @Last Modified at: 2023-06-12 20:17:40
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -13,7 +13,7 @@ import random
 import torch
 
 import utils.io
-import utils.data_transforms
+import utils.transforms
 
 from tqdm import tqdm
 
@@ -115,7 +115,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
 
     def _get_data_transforms(self, cfg, split):
         if split == "train":
-            return utils.data_transforms.Compose(
+            return utils.transforms.Compose(
                 [
                     {
                         "callback": "RandomCrop",
@@ -146,7 +146,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                 ]
             )
         else:
-            return utils.data_transforms.Compose(
+            return utils.transforms.Compose(
                 [
                     {
                         "callback": "CenterCrop",
@@ -294,7 +294,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
     def _get_data_transforms(self, cfg, split):
         BULIDING_MASK_ID = 2
         if split == "train":
-            return utils.data_transforms.Compose(
+            return utils.transforms.Compose(
                 [
                     {
                         "callback": "RandomCrop",
@@ -337,7 +337,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                 ]
             )
         else:
-            return utils.data_transforms.Compose(
+            return utils.transforms.Compose(
                 [
                     {
                         "callback": "CenterCrop",
@@ -489,7 +489,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
     def _get_data_transforms(self, cfg, split):
         BULIDING_MASK_ID = 2
         if split == "train":
-            return utils.data_transforms.Compose(
+            return utils.transforms.Compose(
                 [
                     {
                         "callback": "BuildingMaskRemap",
@@ -541,7 +541,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                 ]
             )
         else:
-            return utils.data_transforms.Compose(
+            return utils.transforms.Compose(
                 [
                     {
                         "callback": "BuildingMaskRemap",

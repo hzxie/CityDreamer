@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:09:04
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-11 15:26:35
+# @Last Modified at: 2023-06-12 20:58:57
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/CompVis/taming-transformers
 
@@ -24,6 +24,7 @@ normalize = lambda c_in: torch.nn.GroupNorm(
 class VQAutoEncoder(torch.nn.Module):
     def __init__(self, cfg):
         super().__init__()
+        self.cfg = cfg
         self.encoder = Encoder(cfg)
         self.decoder = Decoder(cfg)
         self.quantize = VectorQuantizer(cfg)

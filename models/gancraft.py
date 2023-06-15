@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-12 19:39:22
+# @Last Modified at: 2023-06-14 18:59:49
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -485,48 +485,48 @@ class LocalEncoder(torch.nn.Module):
     def __init__(self, cfg):
         super(LocalEncoder, self).__init__()
         n_classes = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
-        self.hf_conv = torch.nn.Conv2d(1, 64, kernel_size=4, stride=4)
-        self.seg_conv = torch.nn.Conv2d(n_classes, 64, kernel_size=4, stride=4)
-        self.swin = torchvision.models.swin_b(
-            weights=torchvision.models.Swin_B_Weights.DEFAULT
+        self.hf_conv = torch.nn.Conv2d(1, 32, kernel_size=7, stride=2, padding=3)
+        self.seg_conv = torch.nn.Conv2d(
+            n_classes, 32, kernel_size=7, stride=2, padding=3
         )
-        self.dconv1 = torch.nn.ConvTranspose2d(
-            1024, 512, kernel_size=4, stride=2, padding=1
+        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM == "BATCH_NORM":
+            self.bn1 = torch.nn.BatchNorm2d(64)
+        elif cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM == "GROUP_NORM":
+            self.bn1 = torch.nn.GroupNorm(32, 64)
+        else:
+            raise ValueError(
+                "Unknown normalization: %s" % cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM
+            )
+        self.conv2 = ResConvBlock(64, 128, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.conv3 = ResConvBlock(128, 256, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.conv4 = ResConvBlock(256, 512, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.dconv5 = torch.nn.ConvTranspose2d(
+            512, 128, kernel_size=4, stride=2, padding=1
         )
-        self.dconv2 = torch.nn.ConvTranspose2d(
-            512, 256, kernel_size=4, stride=2, padding=1
+        self.dconv6 = torch.nn.ConvTranspose2d(
+            128, 32, kernel_size=4, stride=2, padding=1
         )
-        self.dconv3 = torch.nn.ConvTranspose2d(
-            256, 128, kernel_size=4, stride=2, padding=1
+        self.dconv7 = torch.nn.Conv2d(
+            32, cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM - 1, kernel_size=1
         )
-        self.dconv4 = torch.nn.ConvTranspose2d(
-            128,
-            cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM - 1,
-            kernel_size=4,
-            stride=2,
-            padding=1,
-        )
-        # Remove the input and output layers to reduce VRAM
-        self.swin.features[0] = self.swin.features[0][1:]
-        self.swin.head = None
 
     def forward(self, hf_seg):
         hf = self.hf_conv(hf_seg[:, [0]])
         seg = self.seg_conv(hf_seg[:, 1:])
-        out = torch.cat([hf, seg], dim=1)
+        out = F.relu(self.bn1(torch.cat([hf, seg], dim=1)), inplace=True)
+        # print(out.size())   # torch.Size([N, 64, H/2, W/2])
+        out = F.avg_pool2d(self.conv2(out), 2, stride=2)
         # print(out.size())   # torch.Size([N, 128, H/4, W/4])
-        out = self.swin.features(out)
-        # print(out.size())   # torch.Size([N, H/32, W/32, 1024])
-        out = self.swin.norm(out).permute(0, 3, 1, 2)
-        # print(out.size())   # torch.Size([N, 1024, H/32, W/32])
-        out = self.dconv1(out)
-        # print(out.size())   # torch.Size([N, 512, H/16, W/16])
-        out = self.dconv2(out)
-        # print(out.size())   # torch.Size([N, 256, H/8, W/8])
-        out = self.dconv3(out)
-        # print(out.size())   # torch.Size([N, 128, H/4, W/4])
-        out = self.dconv4(out)
-        # print(out.size())   # torch.Size([N, ENCODER_OUT_DIM, H/2, W/2])
+        out = self.conv3(out)
+        # print(out.size())   # torch.Size([N, 256, H/4, W/4])
+        out = self.conv4(out)
+        # print(out.size())   # torch.Size([N, 512, H/4, W/4])
+        out = self.dconv5(out)
+        # print(out.size())   # torch.Size([N, 128, H/2, W/2])
+        out = self.dconv6(out)
+        # print(out.size())   # torch.Size([N, 32, H, W])
+        out = self.dconv7(out)
+        # print(out.size())   # torch.Size([N, OUT_DIM - 1, H, W])
         return torch.tanh(out)
 
 
