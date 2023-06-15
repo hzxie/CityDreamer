@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 14:18:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 15:00:17
+# @Last Modified at: 2023-06-15 15:28:43
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -183,8 +183,9 @@ class BuildingMaskRemap(object):
         self.objects = objects
 
     def _building_mask_remap(self, seg_map, value_map):
-        for src, dst in value_map.items():
-            seg_map[seg_map == src] = dst
+        if value_map is not None:
+            for src, dst in value_map.items():
+                seg_map[seg_map == src] = dst
 
         seg_map[seg_map >= self.min_bld_ins_id] = 0
         return seg_map
@@ -193,15 +194,17 @@ class BuildingMaskRemap(object):
         for k, v in data.items():
             if k in self.objects:
                 bld_ins_id = data[self.attr] if self.attr in data else None
-                assert (
-                    bld_ins_id % 2 == 0
-                ), "Building instance ID MUST BE an even number."
-                data[k] = self._building_mask_remap(
-                    v,
+                value_map = (
                     {
                         bld_ins_id: self.bld_facade_label,
                         bld_ins_id - 1: self.bld_roof_label,
-                    },
+                    }
+                    if bld_ins_id is not None
+                    else None
+                )
+                data[k] = self._building_mask_remap(
+                    v,
+                    value_map,
                 )
 
         return data
