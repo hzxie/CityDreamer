@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-12 19:39:22
+# @Last Modified at: 2023-06-15 19:48:20
 # @Email:  root@haozhexie.com
 
 import logging
@@ -76,7 +76,12 @@ def test(cfg, test_data_loader=None, gancraft=None):
                 if idx < 3:
                     if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
                         masks = torch.zeros_like(data["mask"], device=gancraft.device)
-                        masks[voxel_id[:, None, ..., 0, 0] == 2] = 1
+                        masks[
+                            torch.isin(
+                                voxel_id[:, None, ..., 0, 0],
+                                torch.tensor([2, 7], device=gancraft.device),
+                            )
+                        ] = 1
                         footage = footage * masks
 
                     key_frames[
@@ -88,5 +93,6 @@ def test(cfg, test_data_loader=None, gancraft=None):
                     "Test[%d/%d] Losses = %s"
                     % (idx + 1, n_samples, ["%.4f" % l for l in test_losses.val()])
                 )
+            
 
     return test_losses, key_frames

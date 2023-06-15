@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-12 19:39:22
+# @Last Modified at: 2023-06-15 19:48:23
 # @Email:  root@haozhexie.com
 
 import copy
@@ -176,7 +176,12 @@ def train(cfg):
             footages = utils.helpers.var_or_cuda(data["footage"], gancraft_g.device)
             masks = utils.helpers.var_or_cuda(data["mask"], gancraft_g.device)
             if cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-                masks[voxel_id[:, None, ..., 0, 0] != 2] = 0
+                masks[
+                    ~torch.isin(
+                        voxel_id[:, None, ..., 0, 0],
+                        torch.tensor([2, 7], device=gancraft_g.device),
+                    )
+                ] = 0
             else:
                 masks[voxel_id[:, None, ..., 0, 0] == 2] = 0
 

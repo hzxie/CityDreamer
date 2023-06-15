@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 15:25:26
+# @Last Modified at: 2023-06-15 18:54:06
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -354,6 +354,7 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                             "bld_roof_label": BULIDING_MASK_ID,
                             "min_bld_ins_id": 10,
                         },
+                        "objects": ["voxel_id", "seg"],
                     },
                     {
                         "callback": "ToOneHot",
@@ -551,7 +552,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                     {
                         "callback": "BuildingMaskRemap",
                         "parameters": {
-                            "src_attr": "building_id",
+                            "attr": "building_id",
                             "bld_facade_label": BULIDING_FACADE_ID,
                             "bld_roof_label": BULIDING_ROOF_ID,
                             "min_bld_ins_id": 10,
