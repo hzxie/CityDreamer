@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 14:04:17
+# @Last Modified at: 2023-06-17 11:35:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -39,6 +39,7 @@ HEIGHTS = {
     "GREEN_LANDS": 8,
     "CONSTRUCTION": 10,
     "COAST_ZONES": 0,
+    "ROOF": 4,
 }
 CLASSES = {
     "NULL": 0,
@@ -54,6 +55,7 @@ CLASSES = {
 # Assume the ID of a facade instance is 2k, the corresponding roof instance is 2k - 1.
 CONSTANTS = {
     "BLD_INS_LABEL_MIN": 10,
+    "MAX_LAYOUT_HEIGHT": 640,
 }
 
 
@@ -362,7 +364,7 @@ def _get_img_patch(img, cx, cy, patch_size):
     return img[h_s:h_e, x_s:x_e]
 
 
-def _get_instance_seg_map(seg_map, contours, use_contours=False):
+def get_instance_seg_map(seg_map, contours=None, use_contours=False):
     if use_contours:
         _, labels, stats, _ = cv2.connectedComponentsWithStats(
             (1 - contours).astype(np.uint8), connectivity=4
@@ -410,6 +412,31 @@ def _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_origin):
     mc_rgb = mc_rgb * diffuse_shade.cpu().numpy()
     mc_rgb = (mc_rgb ** (1 / 2.2)) * 255
     return Image.fromarray(mc_rgb.astype(np.uint8))
+
+
+def get_seg_volume(part_seg_map, part_hf, tensor_extruder=None):
+    if tensor_extruder is None:
+        tensor_extruder = TensorExtruder(CONSTANTS["MAX_LAYOUT_HEIGHT"])
+
+    seg_volume = tensor_extruder(
+        torch.from_numpy(part_seg_map[None, None, ...]).cuda(),
+        torch.from_numpy(part_hf[None, None, ...]).cuda(),
+    ).squeeze()
+    logging.debug("The shape of SegVolume: %s" % (seg_volume.size(),))
+    # Change the top-level voxel of the "Building Facade" to "Building Roof"
+    roof_seg_map = part_seg_map.copy()
+    non_roof_msk = part_seg_map <= CONSTANTS["BLD_INS_LABEL_MIN"]
+    # Assume the ID of a facade instance is 2k, the corresponding roof instance is 2k - 1.
+    roof_seg_map = roof_seg_map - 1
+    roof_seg_map[non_roof_msk] = 0
+    for rh in range(HEIGHTS["ROOF"]):
+        seg_volume = seg_volume.scatter_(
+            dim=2,
+            index=torch.from_numpy(part_hf[..., None] + rh).long().cuda(),
+            src=torch.from_numpy(roof_seg_map[..., None]).cuda(),
+        )
+
+    return seg_volume
 
 
 def get_google_earth_aligned_seg_maps(
@@ -483,25 +510,10 @@ def get_google_earth_aligned_seg_maps(
         part_building_stats[bid] = _stats
 
     # Build 3D Semantic Volume
-    seg_volume = tensor_extruder(
-        torch.from_numpy(part_seg_map[None, None, ...]).cuda(),
-        torch.from_numpy(part_hf[None, None, ...]).cuda(),
-    ).squeeze()
-    logging.debug("The shape of SegVolume: %s" % (seg_volume.size(),))
-    # Change the top-level voxel of the "Building Facade" to "Building Roof"
-    roof_seg_map = part_seg_map.copy()
-    non_roof_msk = part_seg_map <= CONSTANTS["BLD_INS_LABEL_MIN"]
-    # Assume the ID of a facade instance is 2k, the corresponding roof instance is 2k - 1.
-    roof_seg_map = roof_seg_map - 1
-    roof_seg_map[non_roof_msk] = part_seg_map[non_roof_msk]
-    seg_volume = seg_volume.scatter_(
-        dim=2,
-        index=torch.from_numpy(part_hf[..., None]).long().cuda(),
-        src=torch.from_numpy(roof_seg_map[..., None]).cuda(),
-    )
+    seg_volume = get_seg_volume(part_seg_map, part_hf, tensor_extruder)
 
-    seg_maps = []
     # Convert camera position to the voxel coordinate system
+    seg_maps = []
     vol_cx, vol_cy = ((patch_size - 1) // 2, (patch_size - 1) // 2)
     for gcp in tqdm(ge_camera_poses["poses"], desc="Project: %s" % ge_project_name):
         x, y = utils.osm_helper.lnglat2xy(
@@ -647,7 +659,7 @@ def main(
                 json.dump(metadata, f)
 
         # Generate building instance segmentation map and the corresponding metadata
-        ins_seg_map, building_stats = _get_instance_seg_map(seg_map, contours)
+        ins_seg_map, building_stats = get_instance_seg_map(seg_map, contours)
         logging.info("%d building instances in %s" % (len(building_stats), basename))
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")
