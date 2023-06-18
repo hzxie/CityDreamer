@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-17 11:35:36
+# @Last Modified at: 2023-06-18 10:27:35
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -429,7 +429,7 @@ def get_seg_volume(part_seg_map, part_hf, tensor_extruder=None):
     # Assume the ID of a facade instance is 2k, the corresponding roof instance is 2k - 1.
     roof_seg_map = roof_seg_map - 1
     roof_seg_map[non_roof_msk] = 0
-    for rh in range(HEIGHTS["ROOF"]):
+    for rh in range(1, HEIGHTS["ROOF"] + 1):
         seg_volume = seg_volume.scatter_(
             dim=2,
             index=torch.from_numpy(part_hf[..., None] + rh).long().cuda(),
