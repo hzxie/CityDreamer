@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-01 10:27:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-02 20:17:32
+# @Last Modified at: 2023-06-16 16:12:55
 # @Email:  root@haozhexie.com
 #
 # Quick Start
@@ -46,10 +46,10 @@ def get_seem_model(seem_home, seem_cfg):
     xdecoder = importlib.import_module("xdecoder")
     opt = arguments.load_opt_from_config_files(os.path.join(seem_home, seem_cfg))
     opt = distributed.init_distributed(opt)
-    ckpt_file_path = os.path.join(seem_home, "seem_focalt_v1.pt")
+    ckpt_file_path = os.path.join(seem_home, "seem_focalt_v2.pt")
     if not os.path.exists(ckpt_file_path):
         urllib.request.urlretrieve(
-            "https://projects4jw.blob.core.windows.net/x-decoder/release/seem_focalt_v1.pt",
+            "https://huggingface.co/xdecoder/SEEM/resolve/main/seem_focalt_v2.pt",
             ckpt_file_path,
         )
 

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 18:54:06
+# @Last Modified at: 2023-06-19 15:29:40
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -466,9 +466,13 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         buliding_ids = buliding_ids[buliding_ids % 2 == 0]
         # Fix bld_idx in test mode
         n_bulidings = len(buliding_ids)
+        # Fix a bug causes empty range for randrange() (0, 0, 0) for random.randint()
+        if n_bulidings == 0:
+            return None
+
         bld_idx = n_bulidings // 2
         # Make sure that the building contains unambiguous pixels
-        n_times = 0
+        n_times = 0 
         while n_times < n_max_times:
             n_times += 1
             if rnd_mode:

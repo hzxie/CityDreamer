@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 13:25:25
+# @Last Modified at: 2023-06-16 10:40:30
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -68,8 +68,16 @@ def get_seg_map(seg_map):
 
 
 def get_ins_seg_map_palette(legacy_palette):
-    MAX_N_INSTANCES = 65536
-    palatte = np.random.randint(256, size=(MAX_N_INSTANCES, 3))
+    MAX_N_INSTANCES = 32768
+    # Make sure that the roof colors are similar to the corresponding facade colors.
+    # The odd and even indexes are reserved for roof and facade, respectively.
+    palatte0 = np.random.randint(256, size=(MAX_N_INSTANCES, 3))
+    # palatte1 = (255 - palatte0) // 50  + palatte0
+    palatte1 = palatte0 - 2
+    palatte1[palatte1 < 0] = 0
+
+    palatte = np.concatenate((palatte0, palatte1), axis=1)
+    palatte = palatte.reshape(-1, 3)
     palatte[:7] = legacy_palette[:7]
     return palatte
 

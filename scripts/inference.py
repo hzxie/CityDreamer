@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-06 16:16:15
+# @Last Modified at: 2023-06-19 15:15:58
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -32,10 +32,12 @@ import extensions.voxlib
 import models.vqgan
 import models.sampler
 import models.gancraft
+import scripts.dataset_generator
 import utils.helpers
 
 CONSTANTS = {
-    "BULIDING_MASK_ID": 2,
+    "BLD_FACADE_ID": 2,
+    "BLD_ROOF_ID": 7,
     "BLD_INS_LABEL_MIN": 10,
     "LAYOUT_MAX_HEIGHT": 640,
     "LAYOUT_N_CLASSES": 7,
@@ -49,24 +51,47 @@ CONSTANTS = {
 }
 
 
-def get_instance_seg_map(seg_map):
-    # Copied from scripts/dataset_generator.py
-    _, labels, stats, _ = cv2.connectedComponentsWithStats(
-        (seg_map == CONSTANTS["BULIDING_MASK_ID"]).astype(np.uint8), connectivity=4
-    )
-    # Remove non-building instance masks
-    labels[seg_map != CONSTANTS["BULIDING_MASK_ID"]] = 0
-    # Building instance mask
-    building_mask = labels != 0
+def get_layout_codebook_indexes(sampler, vqae, indexes=None, temperature=1):
+    with torch.no_grad():
+        min_encoding_indices = sampler.module.sample(
+            1,
+            sampler.module.cfg.NETWORK.SAMPLER.TOTAL_STEPS,
+            x_t=indexes,
+            temperature=temperature,
+            device=sampler.device,
+        )
+        # print(min_encoding_indices.size())  # torch.Size([bs, att_size**2])
+        min_encoding_indices = min_encoding_indices.unsqueeze(dim=2)
+        one_hot = torch.zeros(
+            (
+                1,
+                sampler.module.cfg.NETWORK.SAMPLER.BLOCK_SIZE,
+                vqae.module.cfg.NETWORK.VQGAN.N_EMBED,
+            ),
+            device=sampler.device,
+        )
+        return one_hot.scatter_(2, min_encoding_indices, 1)
 
-    # Building Instance Mask starts from 10 (labels + 10)
-    seg_map[seg_map == CONSTANTS["BULIDING_MASK_ID"]] = 0
-    seg_map = (
-        seg_map * (1 - building_mask)
-        + (labels + CONSTANTS["BLD_INS_LABEL_MIN"]) * building_mask
-    )
-    assert np.max(labels) < 2147483648
-    return seg_map.astype(np.int32), stats[:, :4]
+
+def get_layout(vqae, one_hot):
+    with torch.no_grad():
+        codebook = vqae.module.quantize.get_codebook()
+        quant = (
+            torch.matmul(
+                one_hot.view(-1, vqae.module.cfg.NETWORK.VQGAN.N_EMBED), codebook
+            )
+            .float()
+            .view(
+                1,
+                vqae.module.cfg.NETWORK.VQGAN.ATTN_RESOLUTION,
+                vqae.module.cfg.NETWORK.VQGAN.ATTN_RESOLUTION,
+                vqae.module.cfg.NETWORK.VQGAN.EMBED_DIM,
+            )
+            .permute(0, 3, 1, 2)
+            .contiguous()
+        )
+        # print(quant.size())   # torch.Size([bs, embed_dim, att_size, att_size])
+        pred = vqae.module.decode(quant)
 
 
 def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None):
@@ -74,12 +99,12 @@ def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None):
         hf = np.array(Image.open(os.path.join(city_osm_dir, "hf.png")))
         seg = np.array(Image.open(os.path.join(city_osm_dir, "seg.png")).convert("P"))
     else:
-        raise NotImplementedError
+        size = (CONSTANTS["LAYOUT_VOL_SIZE"],) * 2 if hf_seg is None else hf_seg.shape
 
     # Mapping constructions to buildings
     seg[seg == 4] = 2
     # Generate building instance seg maps
-    seg, building_stats = get_instance_seg_map(seg)
+    seg, building_stats = scripts.dataset_generator.get_instance_seg_map(seg)
     return hf.astype(np.int32), seg.astype(np.int32), building_stats
 
 
@@ -91,14 +116,6 @@ def get_image_patch(image, cx, cy, patch_size):
     return image[sy:ey, sx:ex]
 
 
-def get_seg_volume(part_hf, part_seg):
-    tensor_extruder = extensions.extrude_tensor.TensorExtruder(
-        CONSTANTS["LAYOUT_MAX_HEIGHT"]
-    )
-    seg_volume = tensor_extruder(part_seg, part_hf).squeeze()
-    return seg_volume
-
-
 def get_voxel_intersection_perspective(seg_volume, camera_location):
     CAMERA_FOCAL = (
         CONSTANTS["GES_IMAGE_HEIGHT"] / 2 / np.tan(np.deg2rad(CONSTANTS["GES_VFOV"]))
@@ -108,7 +125,7 @@ def get_voxel_intersection_perspective(seg_volume, camera_location):
         "x": seg_volume.size(1) // 2 - 1,
         "y": seg_volume.size(0) // 2 - 1,
     }
-    cam_ori_t = torch.tensor(
+    cam_origin = torch.tensor(
         [
             camera_location["y"],
             camera_location["x"],
@@ -120,7 +137,7 @@ def get_voxel_intersection_perspective(seg_volume, camera_location):
 
     voxel_id, depth2, raydirs = extensions.voxlib.ray_voxel_intersection_perspective(
         seg_volume,
-        cam_ori_t,
+        cam_origin,
         torch.tensor(
             [
                 camera_target["y"] - camera_location["y"],
@@ -143,7 +160,7 @@ def get_voxel_intersection_perspective(seg_volume, camera_location):
         voxel_id.unsqueeze(dim=0),
         depth2.permute(1, 2, 0, 3, 4).unsqueeze(dim=0),
         raydirs.unsqueeze(dim=0),
-        cam_ori_t.unsqueeze(dim=0),
+        cam_origin.unsqueeze(dim=0),
     )
 
 
@@ -179,11 +196,11 @@ def get_img_without_pad(img, sx, ex, sy, ey, psx, pex, psy, pey):
     ]
 
 
-def render_bg(patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, z):
+def render_bg(
+    patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_origin, z
+):
     _voxel_id = copy.deepcopy(voxel_id)
-    _voxel_id[voxel_id >= CONSTANTS["BLD_INS_LABEL_MIN"]] = CONSTANTS[
-        "BULIDING_MASK_ID"
-    ]
+    _voxel_id[voxel_id >= CONSTANTS["BLD_INS_LABEL_MIN"]] = CONSTANTS["BLD_FACADE_ID"]
     assert (_voxel_id < CONSTANTS["LAYOUT_N_CLASSES"]).all()
     bg_img = torch.zeros(
         1,
@@ -204,7 +221,7 @@ def render_bg(patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_or
                 _voxel_id[:, psy:pey, psx:pex],
                 depth2[:, psy:pey, psx:pex],
                 raydirs[:, psy:pey, psx:pex],
-                cam_ori_t,
+                cam_origin,
                 z,
             )
             bg_img[:, :, sy:ey, sx:ex] = get_img_without_pad(
@@ -222,17 +239,19 @@ def render_fg(
     voxel_id,
     depth2,
     raydirs,
-    cam_ori_t,
+    cam_origin,
     building_stats,
     building_z,
 ):
     _voxel_id = copy.deepcopy(voxel_id)
-    _voxel_id[voxel_id != building_id] = 0
-    _voxel_id[voxel_id == building_id] = CONSTANTS["BULIDING_MASK_ID"]
+    _curr_bld = torch.tensor([building_id, building_id - 1], device=voxel_id.device)
+    _voxel_id[~torch.isin(_voxel_id, _curr_bld)] = 0
+    _voxel_id[voxel_id == building_id] = CONSTANTS["BLD_FACADE_ID"]
+    _voxel_id[voxel_id == building_id - 1] = CONSTANTS["BLD_ROOF_ID"]
     # assert (_voxel_id < CONSTANTS["LAYOUT_N_CLASSES"]).all()
     _hf_seg = copy.deepcopy(hf_seg)
     _hf_seg[hf_seg != building_id] = 0
-    _hf_seg[hf_seg == building_id] = CONSTANTS["BULIDING_MASK_ID"]
+    _hf_seg[hf_seg == building_id] = CONSTANTS["BLD_FACADE_ID"]
     _raydirs = copy.deepcopy(raydirs)
     _raydirs[voxel_id[..., 0, 0] != building_id] = 0
 
@@ -274,11 +293,13 @@ def render_fg(
                     _voxel_id[:, psy:pey, psx:pex],
                     depth2[:, psy:pey, psx:pex],
                     _raydirs[:, psy:pey, psx:pex],
-                    cam_ori_t,
+                    cam_origin,
                     torch.from_numpy(np.array(building_stats)).unsqueeze(dim=0),
                     building_z,
                 )
-                mask = (voxel_id[:, sy:ey, sx:ex, 0, 0] == building_id).unsqueeze(dim=1)
+                mask = (
+                    torch.isin(voxel_id[:, sy:ey, sx:ex, 0, 0], _curr_bld)
+                ).unsqueeze(dim=1)
                 fg_mask[:, :, sy:ey, sx:ex] = mask
                 fg_img[:, :, sy:ey, sx:ex] = mask * get_img_without_pad(
                     output_fg, sx, ex, sy, ey, psx, pex, psy, pey
@@ -298,15 +319,18 @@ def render(
     bg_z,
     building_zs,
 ):
-    voxel_id, depth2, raydirs, cam_ori_t = get_voxel_intersection_perspective(
+    voxel_id, depth2, raydirs, cam_origin = get_voxel_intersection_perspective(
         seg_volume, cam_pos
     )
     buildings = torch.unique(voxel_id[voxel_id > CONSTANTS["BLD_INS_LABEL_MIN"]])
+    # Remove odd numbers from the list because they are reserved by roofs.
+    buildings = buildings[buildings % 2 == 0]
     with torch.no_grad():
         bg_img = render_bg(
-            patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_ori_t, bg_z
+            patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_origin, bg_z
         )
         for b in buildings:
+            assert b % 2 == 0, "Building Instance ID MUST be an even number."
             fg_img, fg_mask = render_fg(
                 patch_size,
                 gancraft_fg,
@@ -315,7 +339,7 @@ def render(
                 voxel_id,
                 depth2,
                 raydirs,
-                cam_ori_t,
+                cam_origin,
                 building_stats[b.item()],
                 building_zs[b.item()],
             )
@@ -334,27 +358,45 @@ def main(
 ):
     # Load checkpoints
     logging.info("Loading checkpoints ...")
+    sampler_ckpt = torch.load(sampler_ckpt)
     gancraft_bg_ckpt = torch.load(gancraft_bg_ckpt)
     gancraft_fg_ckpt = torch.load(gancraft_fg_ckpt)
 
+    copy_gancraft_bg_ckpt = copy.deepcopy(gancraft_bg_ckpt)
+    for k, v in copy_gancraft_bg_ckpt["gancraft_g"].items():
+        if k.startswith("module.cond_hash_grid"):
+            k = k.replace("module.cond_hash_grid", "module.encoder")
+        elif k.startswith("module.grid_encoder"):
+            k = k.replace("module.grid_encoder", "module.pos_encoder")
+        gancraft_bg_ckpt["gancraft_g"][k] = v
+
     # Initialize models
     logging.info("Initializing models ...")
+    vqae = models.vqgan.VQAutoEncoder(sampler_ckpt["cfg"])
+    sampler = models.sampler.AbsorbingDiffusionSampler(sampler_ckpt["cfg"])
     gancraft_bg = models.gancraft.GanCraftGenerator(gancraft_bg_ckpt["cfg"])
     gancraft_fg = models.gancraft.GanCraftGenerator(gancraft_fg_ckpt["cfg"])
     if torch.cuda.is_available():
+        vqae = torch.nn.DataParallel(vqae).cuda()
+        sampler = torch.nn.DataParallel(sampler).cuda()
         gancraft_bg = torch.nn.DataParallel(gancraft_bg).cuda()
         gancraft_fg = torch.nn.DataParallel(gancraft_fg).cuda()
     else:
+        vqae.device = torch.device("cpu")
+        sampler.device = torch.device("cpu")
         gancraft_bg.device = torch.device("cpu")
         gancraft_fg.device = torch.device("cpu")
 
     # Recover from checkpoints
     logging.info("Recovering from checkpoints ...")
-    gancraft_bg.load_state_dict(gancraft_bg_ckpt["gancraft_g"])
-    gancraft_fg.load_state_dict(gancraft_fg_ckpt["gancraft_g"])
+    vqae.load_state_dict(sampler_ckpt["vqae"], strict=False)
+    sampler.load_state_dict(sampler_ckpt["sampler"], strict=False)
+    gancraft_bg.load_state_dict(gancraft_bg_ckpt["gancraft_g"], strict=False)
+    gancraft_fg.load_state_dict(gancraft_fg_ckpt["gancraft_g"], strict=False)
 
     # Generate height fields and seg maps
     logging.info("Generating city layouts ...")
+    # hf, seg, building_stats = get_city_layout(None, sampler, vqae)
     hf, seg, building_stats = get_city_layout(city_osm_dir)
     assert hf.shape == seg.shape
     logging.info("City Layout Patch Size (HxW): %s" % (hf.shape,))
@@ -363,7 +405,7 @@ def main(
     logging.info("Generating latent codes ...")
     bg_z = get_z(gancraft_bg.output_device)
     building_zs = {
-        i + CONSTANTS["BLD_INS_LABEL_MIN"]: get_z(gancraft_bg.output_device)
+        (i + CONSTANTS["BLD_INS_LABEL_MIN"]) * 2: get_z(gancraft_bg.output_device)
         for i in range(len(building_stats))
     }
 
@@ -373,14 +415,22 @@ def main(
     # Generate local image patch of the height field and seg map
     part_hf = get_image_patch(hf, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
     part_seg = get_image_patch(seg, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
+    part_hf = part_hf[::-1, ::-1].copy()
+    part_seg = part_seg[::-1, ::-1].copy()
+
     assert part_hf.shape == (CONSTANTS["LAYOUT_VOL_SIZE"], CONSTANTS["LAYOUT_VOL_SIZE"])
     assert part_hf.shape == part_seg.shape
+
+    _part_seg = part_seg.copy()
+    _part_seg[_part_seg > 10] = 2
+    Image.fromarray((part_seg / np.max(part_seg) * 255).astype(np.uint8)).save("output/hf.png")
+    utils.helpers.get_seg_map(_part_seg).save("output/seg.png")
 
     # Recalculate the building positions based on the current patch
     _buildings = np.unique(part_seg[part_seg > CONSTANTS["BLD_INS_LABEL_MIN"]])
     _building_stats = {}
     for b in _buildings:
-        _b = b - CONSTANTS["BLD_INS_LABEL_MIN"]
+        _b = b // 2 - CONSTANTS["BLD_INS_LABEL_MIN"]
         _building_stats[b] = [
             building_stats[_b, 1] - cy + building_stats[_b, 3] / 2,
             building_stats[_b, 0] - cx + building_stats[_b, 2] / 2,
@@ -388,12 +438,10 @@ def main(
 
     # Build seg_volume
     logging.info("Generating seg volume ...")
+    seg_volume = scripts.dataset_generator.get_seg_volume(part_seg, part_hf)
+
     part_hf = torch.from_numpy(part_hf[None, None, ...]).to(gancraft_bg.output_device)
     part_seg = torch.from_numpy(part_seg[None, None, ...]).to(gancraft_bg.output_device)
-    # print(part_seg.size())    # torch.Size([1, 1, 1536, 1536])
-    assert part_seg.size(1) == 1
-
-    seg_volume = get_seg_volume(part_hf, part_seg)
     part_hf = part_hf / CONSTANTS["LAYOUT_MAX_HEIGHT"]
     part_seg = utils.helpers.masks_to_onehots(
         part_seg[:, 0, :, :], CONSTANTS["LAYOUT_N_CLASSES"]
@@ -413,22 +461,19 @@ def main(
         (CONSTANTS["GES_IMAGE_WIDTH"], CONSTANTS["GES_IMAGE_HEIGHT"]),
     )
     for cp in tqdm(cam_pos):
-        try:
-            img = render(
-                patch_size,
-                seg_volume,
-                hf_seg,
-                cp,
-                gancraft_bg,
-                gancraft_fg,
-                _building_stats,
-                bg_z,
-                building_zs,
-            )
-            img = (utils.helpers.tensor_to_image(img, "RGB") * 255).astype(np.uint8)
-            video.write(img[..., ::-1])
-        except Exception as ex:
-            logging.exception(ex)
+        img = render(
+            patch_size,
+            seg_volume,
+            hf_seg,
+            cp,
+            gancraft_bg,
+            gancraft_fg,
+            _building_stats,
+            bg_z,
+            building_zs,
+        )
+        img = (utils.helpers.tensor_to_image(img, "RGB") * 255).astype(np.uint8)
+        video.write(img[..., ::-1])
 
     video.release()
 
@@ -458,12 +503,12 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--patch_height",
-        default=CONSTANTS["GES_IMAGE_HEIGHT"] // 3,
+        default=CONSTANTS["GES_IMAGE_HEIGHT"] // 5,
         type=int,
     )
     parser.add_argument(
         "--patch_width",
-        default=CONSTANTS["GES_IMAGE_WIDTH"] // 3,
+        default=CONSTANTS["GES_IMAGE_WIDTH"] // 5,
         type=int,
     )
     parser.add_argument(

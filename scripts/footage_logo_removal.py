@@ -4,14 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-01 11:18:46
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-02 15:07:00
+# @Last Modified at: 2023-06-16 15:55:54
 # @Email:  root@haozhexie.com
 #
 # Quick Start
 # - pip install torch==1.12.0+cu113 torchvision==0.13.0+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
 # - pip install mmcv-full==1.7.1 -f https://download.openmmlab.com/mmcv/dist/cu113/torch1.12/index.html
 # - git clone https://github.com/MCG-NKU/E2FGVI.git
-# - [MANUAL DOWNLOAD CKPT to E2FGVI/release_model]
+# - [MANUALLY DOWNLOAD CKPT to E2FGVI/release_model]
 # - https://drive.google.com/file/d/10wGdKSUOie0XmCr8SQ2A2FeDe-mfn5w3/view
 #
 # References

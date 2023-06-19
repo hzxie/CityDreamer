@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 19:48:23
+# @Last Modified at: 2023-06-17 14:10:52
 # @Email:  root@haozhexie.com
 
 import copy
@@ -150,6 +150,9 @@ def train(cfg):
         if train_sampler:
             train_sampler.set_epoch(epoch_idx)
 
+        # Switch models to train mode
+        gancraft_g.train()
+        gancraft_d.train()
         batch_end_time = time()
         for batch_idx, data in enumerate(train_data_loader):
             n_itr = (epoch_idx - 1) * n_batches + batch_idx
