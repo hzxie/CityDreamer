@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 15:12:49
+# @Last Modified at: 2023-06-19 20:43:50
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -33,7 +33,7 @@ cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
 cfg.DATASETS.GOOGLE_EARTH_BUILDING               = EasyDict()
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.PIN_MEMORY    = ["hf", "seg"]
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_REPEAT      = 1
-cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE      = 672
+cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE      = 704
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.CITY          = "US-NewYork"
 
 #
@@ -98,7 +98,7 @@ cfg.NETWORK.SAMPLER.TOTAL_STEPS                  = 256
 # GANCraft
 cfg.NETWORK.GANCRAFT                             = EasyDict()
 cfg.NETWORK.GANCRAFT.BUILDING_MODE               = False
-cfg.NETWORK.GANCRAFT.STYLE_DIM                   = 128
+cfg.NETWORK.GANCRAFT.STYLE_DIM                   = 256
 cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY     = 24
 cfg.NETWORK.GANCRAFT.DIST_SCALE                  = 0.25
 cfg.NETWORK.GANCRAFT.ENCODER                     = "LOCAL"
@@ -112,7 +112,6 @@ cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS          = 16
 cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM         = 8
 cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS          = 10
 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM           = 256
-cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM            = 256
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA        = 1
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR        = 64
 cfg.NETWORK.GANCRAFT.DIS_N_CHANNEL_BASE          = 128

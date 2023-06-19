@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-19 19:46:23
+# @Last Modified at: 2023-06-19 20:43:00
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -73,10 +73,10 @@ class GanCraftGenerator(torch.nn.Module):
             fake_images (N x 3 x H x W tensor): fake images
         """
         bs, device = hf_seg.size(0), hf_seg.device
-        if z is None:
+        if z is None and self.cfg.NETWORK.GANCRAFT.STYLE_DIM is not None:
             z = torch.randn(
                 bs,
-                self.cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
+                self.cfg.NETWORK.GANCRAFT.STYLE_DIM,
                 dtype=torch.float32,
                 device=device,
             )
@@ -661,55 +661,104 @@ class RenderMLP(torch.nn.Module):
             in_dim,
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
         )
-        self.fc_2 = ModLinear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            bias=False,
-            mod_bias=True,
-            output_mode=True,
+        self.fc_2 = (
+            ModLinear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.STYLE_DIM,
+                bias=False,
+                mod_bias=True,
+                output_mode=True,
+            )
+            if cfg.NETWORK.GANCRAFT.STYLE_DIM is not None
+            else torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
         )
-        self.fc_3 = ModLinear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            bias=False,
-            mod_bias=True,
-            output_mode=True,
+        self.fc_3 = (
+            ModLinear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.STYLE_DIM,
+                bias=False,
+                mod_bias=True,
+                output_mode=True,
+            )
+            if cfg.NETWORK.GANCRAFT.STYLE_DIM is not None
+            else torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
         )
-        self.fc_4 = ModLinear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            bias=False,
-            mod_bias=True,
-            output_mode=True,
+        self.fc_4 = (
+            ModLinear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.STYLE_DIM,
+                bias=False,
+                mod_bias=True,
+                output_mode=True,
+            )
+            if cfg.NETWORK.GANCRAFT.STYLE_DIM is not None
+            else torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
         )
 
-        self.fc_sigma = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA,
+        self.fc_sigma = (
+            torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA,
+            )
+            if cfg.NETWORK.GANCRAFT.STYLE_DIM is not None
+            else torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA,
+            )
         )
 
-        self.fc_5 = ModLinear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            bias=False,
-            mod_bias=True,
-            output_mode=True,
+        self.fc_5 = (
+            ModLinear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.STYLE_DIM,
+                bias=False,
+                mod_bias=True,
+                output_mode=True,
+            )
+            if cfg.NETWORK.GANCRAFT.STYLE_DIM is not None
+            else torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
         )
-        self.fc_6 = ModLinear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            bias=False,
-            mod_bias=True,
-            output_mode=True,
+        self.fc_6 = (
+            ModLinear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.STYLE_DIM,
+                bias=False,
+                mod_bias=True,
+                output_mode=True,
+            )
+            if cfg.NETWORK.GANCRAFT.STYLE_DIM is not None
+            else torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
         )
-        self.fc_out_c = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-            cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR,
+        self.fc_out_c = (
+            torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR,
+            )
+            if cfg.NETWORK.GANCRAFT.STYLE_DIM is not None
+            else torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+                cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR,
+            )
         )
         self.act = torch.nn.LeakyReLU(negative_slope=0.2)
 
@@ -718,23 +767,25 @@ class RenderMLP(torch.nn.Module):
 
         Args:
             x (N x H x W x M x in_channels tensor): Projected features.
-            z (N x cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM tensor): Style codes.
+            z (N x cfg.NETWORK.GANCRAFT.STYLE_DIM tensor): Style codes.
             m (N x H x W x M x mask_channels tensor): One-hot segmentation maps.
         """
         # b, h, w, n, _ = x.size()
-        z = z[:, None, None, None, :]
+        assert z is None
+        if z is not None:
+            z = z[:, None, None, None, :]
         f = self.fc_1(x)
         f = f + self.fc_m_a(m)
         # Common MLP
         f = self.act(f)
-        f = self.act(self.fc_2(f, z))
-        f = self.act(self.fc_3(f, z))
-        f = self.act(self.fc_4(f, z))
+        f = self.act(self.fc_2(f, z)) if z is not None else self.act(self.fc_2(f))
+        f = self.act(self.fc_3(f, z)) if z is not None else self.act(self.fc_3(f))
+        f = self.act(self.fc_4(f, z)) if z is not None else self.act(self.fc_4(f))
         # Sigma MLP
-        sigma = self.fc_sigma(f)
+        sigma = self.fc_sigma(f) if z is not None else self.act(self.fc_sigma(f))
         # Color MLP
-        f = self.act(self.fc_5(f, z))
-        f = self.act(self.fc_6(f, z))
+        f = self.act(self.fc_5(f, z)) if z is not None else self.act(self.fc_5(f))
+        f = self.act(self.fc_6(f, z)) if z is not None else self.act(self.fc_6(f))
         c = self.fc_out_c(f)
         return sigma, c
 
@@ -744,10 +795,11 @@ class RenderCNN(torch.nn.Module):
 
     def __init__(self, cfg):
         super(RenderCNN, self).__init__()
-        self.fc_z_cond = torch.nn.Linear(
-            cfg.NETWORK.GANCRAFT.RENDER_STYLE_DIM,
-            2 * 2 * cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
-        )
+        if cfg.NETWORK.GANCRAFT.STYLE_DIM is not None:
+            self.fc_z_cond = torch.nn.Linear(
+                cfg.NETWORK.GANCRAFT.STYLE_DIM,
+                2 * 2 * cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
+            )
         self.conv1 = torch.nn.Conv2d(
             cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_COLOR,
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
@@ -816,19 +868,25 @@ class RenderCNN(torch.nn.Module):
             x (N x in_channels x H x W tensor): Intermediate feature map
             z (N x style_dim tensor): Style codes.
         """
-        z = self.fc_z_cond(z)
-        adapt = torch.chunk(z, 2 * 2, dim=-1)
+        if z is not None:
+            z = self.fc_z_cond(z)
+            adapt = torch.chunk(z, 2 * 2, dim=-1)
 
         y = self.act(self.conv1(x))
         y = y + self.conv2b(self.act(self.conv2a(y)))
-        y = self.act(self.modulate(y, adapt[0], adapt[1]))
+        if z is not None:
+            y = self.act(self.modulate(y, adapt[0], adapt[1]))
+        else:
+            y = self.act(y)
 
         y = y + self.conv3b(self.act(self.conv3a(y)))
-        y = self.act(self.modulate(y, adapt[2], adapt[3]))
+        if z is not None:
+            y = self.act(self.modulate(y, adapt[2], adapt[3]))
+        else:
+            y = self.act(y)
 
         y = y + self.conv4b(self.act(self.conv4a(y)))
         y = self.act(y)
-
         y = self.conv4(y)
 
         return y
