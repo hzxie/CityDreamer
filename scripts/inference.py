@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-19 15:15:58
+# @Last Modified at: 2023-06-20 16:23:21
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -15,6 +15,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import torch
+import torch.nn.functional as F
 import sys
 
 from PIL import Image
@@ -248,12 +249,13 @@ def render_fg(
     _voxel_id[~torch.isin(_voxel_id, _curr_bld)] = 0
     _voxel_id[voxel_id == building_id] = CONSTANTS["BLD_FACADE_ID"]
     _voxel_id[voxel_id == building_id - 1] = CONSTANTS["BLD_ROOF_ID"]
+
     # assert (_voxel_id < CONSTANTS["LAYOUT_N_CLASSES"]).all()
     _hf_seg = copy.deepcopy(hf_seg)
     _hf_seg[hf_seg != building_id] = 0
     _hf_seg[hf_seg == building_id] = CONSTANTS["BLD_FACADE_ID"]
     _raydirs = copy.deepcopy(raydirs)
-    _raydirs[voxel_id[..., 0, 0] != building_id] = 0
+    _raydirs[_voxel_id[..., 0, 0] == 0] = 0
 
     # Crop the "hf_seg" image using the center of the target building as the reference
     cx = CONSTANTS["LAYOUT_VOL_SIZE"] // 2 - int(building_stats[1])
@@ -297,12 +299,32 @@ def render_fg(
                     torch.from_numpy(np.array(building_stats)).unsqueeze(dim=0),
                     building_z,
                 )
-                mask = (
-                    torch.isin(voxel_id[:, sy:ey, sx:ex, 0, 0], _curr_bld)
+                facade_mask = (
+                    voxel_id[:, sy:ey, sx:ex, 0, 0] == building_id
                 ).unsqueeze(dim=1)
-                fg_mask[:, :, sy:ey, sx:ex] = mask
-                fg_img[:, :, sy:ey, sx:ex] = mask * get_img_without_pad(
+                roof_mask = (
+                    voxel_id[:, sy:ey, sx:ex, 0, 0] == building_id - 1
+                ).unsqueeze(dim=1)
+                facade_img = facade_mask * get_img_without_pad(
                     output_fg, sx, ex, sy, ey, psx, pex, psy, pey
+                )
+                roof_img = roof_mask * get_img_without_pad(
+                    F.interpolate(
+                        F.interpolate(output_fg * 0.8, scale_factor=0.75),
+                        scale_factor=4 / 3,
+                    ),
+                    sx,
+                    ex,
+                    sy,
+                    ey,
+                    psx,
+                    pex,
+                    psy,
+                    pey,
+                )
+                fg_mask[:, :, sy:ey, sx:ex] = torch.logical_or(facade_mask, roof_mask)
+                fg_img[:, :, sy:ey, sx:ex] = (
+                    facade_img * facade_mask + roof_img * roof_mask
                 )
 
     return fg_img, fg_mask
@@ -423,8 +445,6 @@ def main(
 
     _part_seg = part_seg.copy()
     _part_seg[_part_seg > 10] = 2
-    Image.fromarray((part_seg / np.max(part_seg) * 255).astype(np.uint8)).save("output/hf.png")
-    utils.helpers.get_seg_map(_part_seg).save("output/seg.png")
 
     # Recalculate the building positions based on the current patch
     _buildings = np.unique(part_seg[part_seg > CONSTANTS["BLD_INS_LABEL_MIN"]])

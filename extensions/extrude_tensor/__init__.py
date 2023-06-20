@@ -18,7 +18,9 @@ class TensorExtruder(torch.nn.Module):
         self.max_height = max_height
 
     def forward(self, seg_map, height_field):
-        assert torch.max(height_field) < self.max_height, "Max Value %d" % torch.max(height_field)
+        assert torch.max(height_field) < self.max_height, "Max Value %d" % torch.max(
+            height_field
+        )
         return ExtrudeTensorFunction.apply(seg_map, height_field, self.max_height)
 
 

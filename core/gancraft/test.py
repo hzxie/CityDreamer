@@ -93,6 +93,5 @@ def test(cfg, test_data_loader=None, gancraft=None):
                     "Test[%d/%d] Losses = %s"
                     % (idx + 1, n_samples, ["%.4f" % l for l in test_losses.val()])
                 )
-            
 
     return test_losses, key_frames
