@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-19 20:43:50
+# @Last Modified at: 2023-06-21 14:57:55
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -33,7 +33,7 @@ cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
 cfg.DATASETS.GOOGLE_EARTH_BUILDING               = EasyDict()
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.PIN_MEMORY    = ["hf", "seg"]
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_REPEAT      = 1
-cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE      = 704
+cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE      = 672
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.CITY          = "US-NewYork"
 
 #
