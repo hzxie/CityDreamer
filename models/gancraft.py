@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-19 20:43:00
+# @Last Modified at: 2023-06-21 15:04:30
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -868,6 +868,82 @@ class SRTConvBlock(torch.nn.Module):
 
     def forward(self, x):
         return self.layers(x)
+
+
+class ResConvBlock(torch.nn.Module):
+    def __init__(self, in_channels, out_channels, norm, bias=False):
+        super(ResConvBlock, self).__init__()
+        # conv3x3(in_planes, int(out_planes / 2))
+        self.conv1 = torch.nn.Conv2d(
+            in_channels,
+            out_channels // 2,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=bias,
+        )
+        # conv3x3(int(out_planes / 2), int(out_planes / 4))
+        self.conv2 = torch.nn.Conv2d(
+            out_channels // 2,
+            out_channels // 4,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=bias,
+        )
+        # conv3x3(int(out_planes / 4), int(out_planes / 4))
+        self.conv3 = torch.nn.Conv2d(
+            out_channels // 4,
+            out_channels // 4,
+            kernel_size=3,
+            stride=1,
+            padding=1,
+            bias=bias,
+        )
+        if norm == "BATCH_NORM":
+            self.bn1 = torch.nn.BatchNorm2d(in_channels)
+            self.bn2 = torch.nn.BatchNorm2d(out_channels // 2)
+            self.bn3 = torch.nn.BatchNorm2d(out_channels // 4)
+            self.bn4 = torch.nn.BatchNorm2d(in_channels)
+        elif norm == "GROUP_NORM":
+            self.bn1 = torch.nn.GroupNorm(32, in_channels)
+            self.bn2 = torch.nn.GroupNorm(32, out_channels // 2)
+            self.bn3 = torch.nn.GroupNorm(32, out_channels // 4)
+            self.bn4 = torch.nn.GroupNorm(32, in_channels)
+
+        if in_channels != out_channels:
+            self.downsample = torch.nn.Sequential(
+                self.bn4,
+                torch.nn.ReLU(True),
+                torch.nn.Conv2d(
+                    in_channels, out_channels, kernel_size=1, stride=1, bias=False
+                ),
+            )
+        else:
+            self.downsample = None
+
+    def forward(self, x):
+        residual = x
+        # print(residual.size())      # torch.Size([N, 64, H, W])
+        out1 = self.bn1(x)
+        out1 = F.relu(out1, True)
+        out1 = self.conv1(out1)
+        # print(out1.size())          # torch.Size([N, 64, H, W])
+        out2 = self.bn2(out1)
+        out2 = F.relu(out2, True)
+        out2 = self.conv2(out2)
+        # print(out2.size())          # torch.Size([N, 32, H, W])
+        out3 = self.bn3(out2)
+        out3 = F.relu(out3, True)
+        out3 = self.conv3(out3)
+        # print(out3.size())          # torch.Size([N, 32, H, W])
+        out3 = torch.cat((out1, out2, out3), dim=1)
+        # print(out3.size())          # torch.Size([N, 128, H, W])
+        if self.downsample is not None:
+            residual = self.downsample(residual)
+            # print(residual.size())  # torch.Size([N, 128, H, W])
+        out3 += residual
+        return out3
 
 
 class ModLinear(torch.nn.Module):
