@@ -489,102 +489,48 @@ class LocalEncoder(torch.nn.Module):
     def __init__(self, cfg):
         super(LocalEncoder, self).__init__()
         n_classes = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
-        self.hf_conv = torch.nn.Conv2d(1, 32, kernel_size=4, stride=2, padding=1)
+        self.hf_conv = torch.nn.Conv2d(1, 32, kernel_size=7, stride=2, padding=3)
         self.seg_conv = torch.nn.Conv2d(
-            n_classes, 32, kernel_size=4, stride=2, padding=1
+            n_classes, 32, kernel_size=7, stride=2, padding=3
         )
-        self.conv1 = torch.nn.Sequential(
-            torch.nn.LeakyReLU(0.2, inplace=True),
-            torch.nn.Conv2d(64, 128, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(128),
+        if cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM == "BATCH_NORM":
+            self.bn1 = torch.nn.BatchNorm2d(64)
+        elif cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM == "GROUP_NORM":
+            self.bn1 = torch.nn.GroupNorm(32, 64)
+        else:
+            raise ValueError(
+                "Unknown normalization: %s" % cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM
+            )
+        self.conv2 = ResConvBlock(64, 128, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.conv3 = ResConvBlock(128, 256, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.conv4 = ResConvBlock(256, 512, cfg.NETWORK.GANCRAFT.LOCAL_ENCODER_NORM)
+        self.dconv5 = torch.nn.ConvTranspose2d(
+            512, 128, kernel_size=4, stride=2, padding=1
         )
-        self.conv2 = torch.nn.Sequential(
-            torch.nn.LeakyReLU(0.2, inplace=True),
-            torch.nn.Conv2d(128, 256, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(256),
+        self.dconv6 = torch.nn.ConvTranspose2d(
+            128, 32, kernel_size=4, stride=2, padding=1
         )
-        self.conv3 = torch.nn.Sequential(
-            torch.nn.LeakyReLU(0.2, inplace=True),
-            torch.nn.Conv2d(256, 512, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(512),
-        )
-        self.conv4 = torch.nn.Sequential(
-            torch.nn.LeakyReLU(0.2, inplace=True),
-            torch.nn.Conv2d(512, 512, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(512),
-        )
-        self.conv5 = torch.nn.Sequential(
-            torch.nn.LeakyReLU(0.2, inplace=True),
-            torch.nn.Conv2d(512, 512, kernel_size=4, stride=2, padding=1),
-        )
-        self.dconv5 = torch.nn.Sequential(
-            torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(512, 512, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(512),
-            torch.nn.Dropout2d(p=0.5, inplace=True),
-        )
-        self.dconv4 = torch.nn.Sequential(
-            torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(1024, 512, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(512),
-            torch.nn.Dropout2d(p=0.5, inplace=True),
-        )
-        self.dconv3 = torch.nn.Sequential(
-            torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(1024, 256, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(256),
-        )
-        self.dconv2 = torch.nn.Sequential(
-            torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(512, 128, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(128),
-        )
-        self.dconv1 = torch.nn.Sequential(
-            torch.nn.ReLU(inplace=True),
-            torch.nn.ConvTranspose2d(256, 64, kernel_size=4, stride=2, padding=1),
-            torch.nn.BatchNorm2d(64),
-        )
-        self.dconv0 = torch.nn.ConvTranspose2d(
-            128,
-            cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM - 1,
-            kernel_size=4,
-            stride=2,
-            padding=1,
+        self.dconv7 = torch.nn.Conv2d(
+            32, cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM - 1, kernel_size=1
         )
 
-    def forward(self, hf_seg, z=None):
+    def forward(self, hf_seg):
         hf = self.hf_conv(hf_seg[:, [0]])
         seg = self.seg_conv(hf_seg[:, 1:])
-        out0 = torch.cat([hf, seg], dim=1)
-        # print(out0.size())  # torch.Size([N, 64, H/2, W/2])
-        out1 = self.conv1(out0)
-        # print(out1.size())  # torch.Size([N, 128, H/4, W/4])
-        out2 = self.conv2(out1)
-        # print(out2.size())  # torch.Size([N, 256, H/8, W/8])
-        out3 = self.conv3(out2)
-        # print(out3.size())  # torch.Size([N, 512, H/16, W/16])
-        out4 = self.conv4(out3)
-        # print(out4.size())  # torch.Size([N, 512, H/32, W/32])
-        out5 = self.conv5(out4)
-        # print(out5.size())  # torch.Size([N, 512, H/64, W/64])
-        out = self.dconv5(out5)
-        # print(out.size())   # torch.Size([N, 512, H/32, W/32])
-        out = torch.cat([out, out4], dim=1)
-        # print(out.size())   # torch.Size([N, 1024, H/32, W/32])
-        out = self.dconv4(out)
-        out = torch.cat([out, out3], dim=1)
-        # print(out.size())   # torch.Size([1, 1024, H/16, W/16])
-        out = self.dconv3(out)
-        out = torch.cat([out, out2], dim=1)
-        # print(out.size())   # torch.Size([1, 512, H/8, W/8])
-        out = self.dconv2(out)
-        out = torch.cat([out, out1], dim=1)
-        # print(out.size())   # torch.Size([1, 256, H/4, W/4])
-        out = self.dconv1(out)
-        out = torch.cat([out, out0], dim=1)
-        # print(out.size())   # torch.Size([1, 128, H/2, W/2])
-        out = self.dconv0(out)
-        # print(out.size())   # torch.Size([1, OUT_DIM - 1, H, W])
+        out = F.relu(self.bn1(torch.cat([hf, seg], dim=1)), inplace=True)
+        # print(out.size())   # torch.Size([N, 64, H/2, W/2])
+        out = F.avg_pool2d(self.conv2(out), 2, stride=2)
+        # print(out.size())   # torch.Size([N, 128, H/4, W/4])
+        out = self.conv3(out)
+        # print(out.size())   # torch.Size([N, 256, H/4, W/4])
+        out = self.conv4(out)
+        # print(out.size())   # torch.Size([N, 512, H/4, W/4])
+        out = self.dconv5(out)
+        # print(out.size())   # torch.Size([N, 128, H/2, W/2])
+        out = self.dconv6(out)
+        # print(out.size())   # torch.Size([N, 32, H, W])
+        out = self.dconv7(out)
+        # print(out.size())   # torch.Size([N, OUT_DIM - 1, H, W])
         return torch.tanh(out)
 
 
@@ -771,7 +717,6 @@ class RenderMLP(torch.nn.Module):
             m (N x H x W x M x mask_channels tensor): One-hot segmentation maps.
         """
         # b, h, w, n, _ = x.size()
-        assert z is None
         if z is not None:
             z = z[:, None, None, None, :]
         f = self.fc_1(x)
