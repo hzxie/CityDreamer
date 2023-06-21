@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-20 16:23:21
+# @Last Modified at: 2023-06-21 20:25:23
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -223,7 +223,8 @@ def render_bg(
                 depth2[:, psy:pey, psx:pex],
                 raydirs[:, psy:pey, psx:pex],
                 cam_origin,
-                z,
+                z=z,
+                deterministic=True,
             )
             bg_img[:, :, sy:ey, sx:ex] = get_img_without_pad(
                 output_bg, sx, ex, sy, ey, psx, pex, psy, pey
@@ -298,6 +299,7 @@ def render_fg(
                     cam_origin,
                     torch.from_numpy(np.array(building_stats)).unsqueeze(dim=0),
                     building_z,
+                    deterministic=True,
                 )
                 facade_mask = (
                     voxel_id[:, sy:ey, sx:ex, 0, 0] == building_id
@@ -308,11 +310,13 @@ def render_fg(
                 facade_img = facade_mask * get_img_without_pad(
                     output_fg, sx, ex, sy, ey, psx, pex, psy, pey
                 )
+                # Make roof blurry
+                # output_fg = F.interpolate(
+                #     F.interpolate(output_fg * 0.8, scale_factor=0.75),
+                #     scale_factor=4 / 3,
+                # ),
                 roof_img = roof_mask * get_img_without_pad(
-                    F.interpolate(
-                        F.interpolate(output_fg * 0.8, scale_factor=0.75),
-                        scale_factor=4 / 3,
-                    ),
+                    output_fg,
                     sx,
                     ex,
                     sy,
@@ -383,6 +387,17 @@ def main(
     sampler_ckpt = torch.load(sampler_ckpt)
     gancraft_bg_ckpt = torch.load(gancraft_bg_ckpt)
     gancraft_fg_ckpt = torch.load(gancraft_fg_ckpt)
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.BUILDING_MODE = False
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.ENCODER = "GLOBAL"
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.ENCODER_OUT_DIM = 2
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.GLOBAL_ENCODER_N_BLOCKS = 6
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.POS_EMD = "HASH_GRID"
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES = True
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS = True
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.STYLE_DIM = 256
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.HASH_GRID_N_LEVELS = 16
+    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM = 8
+    # gancraft_fg_ckpt["cfg"].NETWORK.GANCRAFT.STYLE_DIM = 256
 
     copy_gancraft_bg_ckpt = copy.deepcopy(gancraft_bg_ckpt)
     for k, v in copy_gancraft_bg_ckpt["gancraft_g"].items():
@@ -437,9 +452,6 @@ def main(
     # Generate local image patch of the height field and seg map
     part_hf = get_image_patch(hf, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
     part_seg = get_image_patch(seg, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
-    part_hf = part_hf[::-1, ::-1].copy()
-    part_seg = part_seg[::-1, ::-1].copy()
-
     assert part_hf.shape == (CONSTANTS["LAYOUT_VOL_SIZE"], CONSTANTS["LAYOUT_VOL_SIZE"])
     assert part_hf.shape == part_seg.shape
 

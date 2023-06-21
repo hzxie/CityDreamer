@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-21 15:04:30
+# @Last Modified at: 2023-06-21 20:13:32
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -57,7 +57,15 @@ class GanCraftGenerator(torch.nn.Module):
             self.pos_encoder = SinCosEncoder(cfg)
 
     def forward(
-        self, hf_seg, voxel_id, depth2, raydirs, cam_origin, building_stats=None, z=None
+        self,
+        hf_seg,
+        voxel_id,
+        depth2,
+        raydirs,
+        cam_origin,
+        building_stats=None,
+        z=None,
+        deterministic=False,
     ):
         r"""GANcraft Generator forward.
 
@@ -69,6 +77,8 @@ class GanCraftGenerator(torch.nn.Module):
             raydirs (N x H x W x 1 x 3 tensor): The direction of each ray.
             cam_origin (N x 3 tensor): Camera origins.
             building_stats (N x 5 tensor): The dy, dx, h, w, ID of the target building. (Only used in building mode)
+            z (N x STYLE_DIM tensor): The style vector.
+            deterministic (bool): Whether to use equal-distance sampling instead of random stratified sampling.
         Returns:
             fake_images (N x 3 x H x W tensor): fake images
         """
@@ -86,7 +96,14 @@ class GanCraftGenerator(torch.nn.Module):
             features = self.encoder(hf_seg)
 
         net_out = self._forward_perpix(
-            features, voxel_id, depth2, raydirs, cam_origin, z, building_stats
+            features,
+            voxel_id,
+            depth2,
+            raydirs,
+            cam_origin,
+            z,
+            building_stats,
+            deterministic,
         )
         fake_images = self._forward_global(net_out, z)
         return fake_images
@@ -100,6 +117,7 @@ class GanCraftGenerator(torch.nn.Module):
         cam_origin,
         z,
         building_stats=None,
+        deterministic=False,
     ):
         r"""Sample points along rays, forwarding the per-point MLP and aggregate pixel features
 
@@ -111,6 +129,7 @@ class GanCraftGenerator(torch.nn.Module):
             cam_origin (N x 3 tensor): Camera origins.
             z (N x C3 tensor): Intermediate style vectors.
             building_stats (N x 4 tensor): The dy, dx, h, w of the target building. (Only used in building mode)
+            deterministic (bool): Whether to use equal-distance sampling instead of random stratified sampling.
         """
         # Generate sky_mask; PE transform on ray direction.
         with torch.no_grad():
@@ -124,6 +143,7 @@ class GanCraftGenerator(torch.nn.Module):
                 raydirs,
                 cam_origin,
                 building_stats,
+                deterministic,
             )
             # Generate per-sample segmentation label
             seg_map_bev = torch.gather(voxel_id, -2, new_idx)
@@ -166,7 +186,13 @@ class GanCraftGenerator(torch.nn.Module):
         return net_out
 
     def _get_sampled_coordinates(
-        self, n_samples, depth2, raydirs, cam_origin, building_stats=None
+        self,
+        n_samples,
+        depth2,
+        raydirs,
+        cam_origin,
+        building_stats=None,
+        deterministic=False,
     ):
         # Random sample points along the ray
         rand_depth, new_dists, new_idx = self._sample_depth_batched(
