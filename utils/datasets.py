@@ -472,7 +472,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
 
         bld_idx = n_bulidings // 2
         # Make sure that the building contains unambiguous pixels
-        n_times = 0 
+        n_times = 0
         while n_times < n_max_times:
             n_times += 1
             if rnd_mode:

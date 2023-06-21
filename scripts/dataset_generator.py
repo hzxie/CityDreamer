@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-18 10:27:35
+# @Last Modified at: 2023-06-20 11:06:08
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -39,7 +39,7 @@ HEIGHTS = {
     "GREEN_LANDS": 8,
     "CONSTRUCTION": 10,
     "COAST_ZONES": 0,
-    "ROOF": 4,
+    "ROOF": 1,
 }
 CLASSES = {
     "NULL": 0,
