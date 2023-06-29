@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-20 11:06:08
+# @Last Modified at: 2023-06-29 19:07:48
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -118,8 +118,22 @@ def _get_footprint_color(map_name, footprint_tags):
 
 def _remove_mask_outliers(mask):
     N_PIXELS_THRES = 96
+    MIN_VAL_THRES = 64
     mask = cv2.erode(mask, np.ones((5, 5), dtype=np.uint8))
+    # Ignore small regions
     _, labels, stats, _ = cv2.connectedComponentsWithStats(mask, connectivity=4)
+    ignored_indexes = np.where(stats[:, -1] <= N_PIXELS_THRES)[0]
+    ignored_mask = np.isin(labels, ignored_indexes)
+    mask = mask * ~ignored_mask
+    # Make the border smoother
+    mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=3, sigmaY=3)
+    mask = cv2.dilate(mask, np.ones((7, 7), dtype=np.uint8))
+    mask = cv2.erode(mask, np.ones((7, 7), dtype=np.uint8))
+    mask = cv2.GaussianBlur(mask, (0, 0), sigmaX=1, sigmaY=1)
+    # Ignore small regions
+    _, labels, stats, _ = cv2.connectedComponentsWithStats(
+        (mask >= MIN_VAL_THRES).astype(np.uint8), connectivity=4
+    )
     ignored_indexes = np.where(stats[:, -1] <= N_PIXELS_THRES)[0]
     ignored_mask = np.isin(labels, ignored_indexes)
     return mask * ~ignored_mask
@@ -623,7 +637,12 @@ def main(
     zoom_level,
     debug,
 ):
-    osm_files = sorted([f for f in os.listdir(osm_dir) if f.endswith(".osm")])
+    osm_files = []
+    if os.path.exists(osm_dir):
+        osm_files = sorted([f for f in os.listdir(osm_dir) if f.endswith(".osm")])
+    else:
+        osm_files = sorted([f for f in os.listdir(osm_out_dir)])
+
     tensor_extruder = TensorExtruder(max_height)
     for of in tqdm(osm_files):
         basename, _ = os.path.splitext(of)
