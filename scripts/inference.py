@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-21 20:25:23
+# @Last Modified at: 2023-06-29 19:53:13
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -16,6 +16,7 @@ import numpy as np
 import os
 import torch
 import torch.nn.functional as F
+import torchvision.transforms
 import sys
 
 from PIL import Image
@@ -37,6 +38,7 @@ import scripts.dataset_generator
 import utils.helpers
 
 CONSTANTS = {
+    "ROAD_ID": 1,
     "BLD_FACADE_ID": 2,
     "BLD_ROOF_ID": 7,
     "BLD_INS_LABEL_MIN": 10,
@@ -165,8 +167,10 @@ def get_voxel_intersection_perspective(seg_volume, camera_location):
     )
 
 
-def get_z(device):
-    return torch.randn(1, 256, dtype=torch.float32, device=device)
+def get_z(device, z_dim=256):
+    if z_dim is None:
+        return None
+    return torch.randn(1, z_dim, dtype=torch.float32, device=device)
 
 
 def get_pad_img_bbox(sx, ex, sy, ey):
@@ -200,6 +204,7 @@ def get_img_without_pad(img, sx, ex, sy, ey, psx, pex, psy, pey):
 def render_bg(
     patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_origin, z
 ):
+    blurrer = torchvision.transforms.GaussianBlur(kernel_size=3, sigma=(2, 2))
     _voxel_id = copy.deepcopy(voxel_id)
     _voxel_id[voxel_id >= CONSTANTS["BLD_INS_LABEL_MIN"]] = CONSTANTS["BLD_FACADE_ID"]
     assert (_voxel_id < CONSTANTS["LAYOUT_N_CLASSES"]).all()
@@ -218,14 +223,22 @@ def render_bg(
             ey, ex = sy + patch_size[0], sx + patch_size[1]
             psx, pex, psy, pey = get_pad_img_bbox(sx, ex, sy, ey)
             output_bg = gancraft_bg(
-                hf_seg,
-                _voxel_id[:, psy:pey, psx:pex],
-                depth2[:, psy:pey, psx:pex],
-                raydirs[:, psy:pey, psx:pex],
-                cam_origin,
+                hf_seg=hf_seg,
+                voxel_id=_voxel_id[:, psy:pey, psx:pex],
+                depth2=depth2[:, psy:pey, psx:pex],
+                raydirs=raydirs[:, psy:pey, psx:pex],
+                cam_origin=cam_origin,
+                building_stats=None,
                 z=z,
                 deterministic=True,
             )
+            # Make road blurry
+            road_mask = (
+                (_voxel_id[:, None, psy:pey, psx:pex, 0, 0] == CONSTANTS["ROAD_ID"])
+                .repeat(1, 3, 1, 1)
+                .float()
+            )
+            output_bg = blurrer(output_bg) * road_mask + output_bg * (1 - road_mask)
             bg_img[:, :, sy:ey, sx:ex] = get_img_without_pad(
                 output_bg, sx, ex, sy, ey, psx, pex, psy, pey
             )
@@ -283,6 +296,13 @@ def render_fg(
         dtype=torch.float32,
         device=gancraft_fg.output_device,
     )
+    # Prevent some buildings are out of bound
+    if (
+        _hf_seg.size(2) != CONSTANTS["BUILDING_VOL_SIZE"]
+        or _hf_seg.size(3) != CONSTANTS["BUILDING_VOL_SIZE"]
+    ):
+        return fg_img, fg_mask
+
     # Render foreground patches by patch to avoid OOM
     for i in range(CONSTANTS["GES_IMAGE_HEIGHT"] // patch_size[0]):
         for j in range(CONSTANTS["GES_IMAGE_WIDTH"] // patch_size[1]):
@@ -297,8 +317,10 @@ def render_fg(
                     depth2[:, psy:pey, psx:pex],
                     _raydirs[:, psy:pey, psx:pex],
                     cam_origin,
-                    torch.from_numpy(np.array(building_stats)).unsqueeze(dim=0),
-                    building_z,
+                    building_stats=torch.from_numpy(np.array(building_stats)).unsqueeze(
+                        dim=0
+                    ),
+                    z=building_z,
                     deterministic=True,
                 )
                 facade_mask = (
@@ -387,25 +409,6 @@ def main(
     sampler_ckpt = torch.load(sampler_ckpt)
     gancraft_bg_ckpt = torch.load(gancraft_bg_ckpt)
     gancraft_fg_ckpt = torch.load(gancraft_fg_ckpt)
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.BUILDING_MODE = False
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.ENCODER = "GLOBAL"
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.ENCODER_OUT_DIM = 2
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.GLOBAL_ENCODER_N_BLOCKS = 6
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.POS_EMD = "HASH_GRID"
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES = True
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS = True
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.STYLE_DIM = 256
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.HASH_GRID_N_LEVELS = 16
-    # gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM = 8
-    # gancraft_fg_ckpt["cfg"].NETWORK.GANCRAFT.STYLE_DIM = 256
-
-    copy_gancraft_bg_ckpt = copy.deepcopy(gancraft_bg_ckpt)
-    for k, v in copy_gancraft_bg_ckpt["gancraft_g"].items():
-        if k.startswith("module.cond_hash_grid"):
-            k = k.replace("module.cond_hash_grid", "module.encoder")
-        elif k.startswith("module.grid_encoder"):
-            k = k.replace("module.grid_encoder", "module.pos_encoder")
-        gancraft_bg_ckpt["gancraft_g"][k] = v
 
     # Initialize models
     logging.info("Initializing models ...")
@@ -440,7 +443,7 @@ def main(
 
     # Generate latent codes
     logging.info("Generating latent codes ...")
-    bg_z = get_z(gancraft_bg.output_device)
+    bg_z = get_z(gancraft_bg.output_device, gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.STYLE_DIM)
     building_zs = {
         (i + CONSTANTS["BLD_INS_LABEL_MIN"]) * 2: get_z(gancraft_bg.output_device)
         for i in range(len(building_stats))
@@ -454,9 +457,6 @@ def main(
     part_seg = get_image_patch(seg, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
     assert part_hf.shape == (CONSTANTS["LAYOUT_VOL_SIZE"], CONSTANTS["LAYOUT_VOL_SIZE"])
     assert part_hf.shape == part_seg.shape
-
-    _part_seg = part_seg.copy()
-    _part_seg[_part_seg > 10] = 2
 
     # Recalculate the building positions based on the current patch
     _buildings = np.unique(part_seg[part_seg > CONSTANTS["BLD_INS_LABEL_MIN"]])
