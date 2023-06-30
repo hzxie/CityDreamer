@@ -1,0 +1,130 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="author" content="Haozhe Xie">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CityDreamer Demo</title>
+    <link rel="stylesheet" type="text/css" href="/static/css/semantic.min.css" >
+    <link rel="stylesheet" type="text/css" href="/static/css/style.css" >
+    <script type="text/javascript" src="/static/js/jquery-3.7.0.min.js"></script>
+</head>
+<body>
+    <div id="header">
+        <div class="ui container">
+            <h1>CityDreamer: Generating New York in an Hour</h1>
+            <p>The official demo to generate your own city in New York style.</p>
+            <div class="ui horizontal list">
+                <div class="item">
+                  <div class="content">
+                    <a href="https://github.com/hzxie/city-dreamer" target="_blank"><i class="github icon"></i> Source Code</a>
+                  </div> <!-- .content -->
+                </div> <!-- .item -->
+                <div class="item">
+                  <div class="content">
+                    <a href="https://haozhexie.com/project/city-dreamer" target="_blank"><i class="home icon"></i> Project Page</a>
+                  </div> <!-- .content -->
+                </div> <!-- .item -->
+            </div> <!-- .horizontal.list -->
+            <img src="static/images/logo.png" alt="Logo">
+        </div> <!-- .container -->
+    </div> <!-- #header -->
+    <div class="ui container">
+        <div class="ui grid">
+            <div class="four wide column">
+                <div class="ui vertical steps">
+                    <div class="layout step">
+                        <i class="braille icon"></i>
+                        <div class="content">
+                            <div class="title">Layout</div>
+                            <div class="description">Generate the city layout</div>
+                        </div> <!-- .content -->
+                    </div> <!-- .step -->
+                    <div class="trajectory step">
+                        <i class="camera retro icon"></i>
+                        <div class="content">
+                            <div class="title">Trajectory</div>
+                            <div class="description">Set up camera trajectory</div>
+                        </div> <!-- .content -->
+                    </div> <!-- .step -->
+                    <div class="render step">
+                        <i class="video icon"></i>
+                        <div class="content">
+                            <div class="title">Render</div>
+                            <div class="description">Generate your own city</div>
+                        </div> <!-- .content -->
+                    </div> <!-- .step -->
+                </div> <!-- .ordered.steps -->
+            </div> <!-- .four.wide.column -->
+            <div class="twelve wide column">
+                <div class="ui negative hidden message">
+                    <i class="close icon"></i>
+                    <div class="header">
+                      We're sorry we can't apply that discount
+                    </div>
+                    <p>That offer has expired</p>
+                </div> <!-- .negative.message -->
+                <div class="layout section">
+                    <form class="ui form">
+                        <div class="field">
+                            <div class="fields">
+                                <div class="six wide field">
+                                    <label>Data Source</label>
+                                    <select id="layout-data-src" class="ui dropdown">
+                                        <option value="generator">Layout Generator</option>
+                                        <option value="osm">OpenStreetMap</option>
+                                    </select>
+                                </div> <!-- .six.wide.field -->
+                                <div class="five wide field">
+                                    <label>Layout Size</label>
+                                    <select id="layout-size" class="ui dropdown">
+                                        <option value="1536">1536x1536</option>
+                                        <option value="2048">2048x2048</option>
+                                        <option value="3072">3072x3072</option>
+                                        <option value="4096">4096x4096</option>
+                                        <option value="6144">6144x6144</option>
+                                    </select>
+                                </div> <!-- .five.wide.field -->
+                                <div class="two wide field">
+                                    <label>&nbsp;</label>
+                                    <button class="ui primary button">Generate</button>
+                                </div> <!-- .two.wide.field -->
+                            </div> <!-- .fields -->
+                        </div> <!-- .field -->
+                    </form>
+                    <div id="layout-canvas" class="ui grid">
+                        <div class="eleven wide column">
+                            <label>Segmentation Map</label>
+                            <canvas id="seg-map-canvas"></canvas>
+                            <div id="seg-map-uploader" class="imgdrop hidden">
+                                Drag Seg. Map here
+                            </div> <!-- #seg-map-uploader -->
+                        </div> <!-- .eleven.wide.column -->
+                        <div class="five wide column">
+                            <label>Height Field</label>
+                            <canvas id="hf-canvas"></canvas>
+                            <div id="hf-uploader" class="imgdrop hidden">
+                                Drag Seg. Map here
+                            </div> <!-- #hf-uploader -->
+                            <div class="ui buttons">
+                                <button class="ui attached button">Reset Zoom</button>
+                                <button class="ui attached button">100%</button>
+                            </div> <!-- .buttons -->
+                        </div> <!-- .five.wide.column -->
+                    </div> <!-- .equal.width.grid -->
+                </div> <!-- #layout-section -->
+                <div class="trajectory section">
+                    Trajectory Section
+                </div> <!-- #trajectory-section -->
+                <div class="render section">
+                    Render Section
+                </div> <!-- #render-section -->
+            </div> <!-- .twelve.wide.column -->
+        </div> <!-- .grid -->
+    </div> <!-- .container -->
+    <script type="text/javascript" src="static/js/semantic.min.js"></script>
+    <script type="text/javascript" src="static/js/fabric-5.3.0.min.js"></script>
+    <script type="text/javascript" src="static/js/jquery.image-drop.js"></script>
+    <script type="text/javascript" src="static/js/app.js"></script>
+</body>
+</html>

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-29 19:53:13
+# @Last Modified at: 2023-06-29 20:11:11
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -15,7 +15,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 import torch
-import torch.nn.functional as F
 import torchvision.transforms
 import sys
 
@@ -52,6 +51,39 @@ CONSTANTS = {
     "IMAGE_PADDING": 8,
     "N_VOXEL_INTERSECT_SAMPLES": 6,
 }
+
+
+def get_models(sampler_ckpt, gancraft_bg_ckpt, gancraft_fg_ckpt):
+    # Load checkpoints
+    logging.info("Loading checkpoints ...")
+    sampler_ckpt = torch.load(sampler_ckpt)
+    gancraft_bg_ckpt = torch.load(gancraft_bg_ckpt)
+    gancraft_fg_ckpt = torch.load(gancraft_fg_ckpt)
+
+    # Initialize models
+    vqae = models.vqgan.VQAutoEncoder(sampler_ckpt["cfg"])
+    sampler = models.sampler.AbsorbingDiffusionSampler(sampler_ckpt["cfg"])
+    gancraft_bg = models.gancraft.GanCraftGenerator(gancraft_bg_ckpt["cfg"])
+    gancraft_fg = models.gancraft.GanCraftGenerator(gancraft_fg_ckpt["cfg"])
+    if torch.cuda.is_available():
+        vqae = torch.nn.DataParallel(vqae).cuda()
+        sampler = torch.nn.DataParallel(sampler).cuda()
+        gancraft_bg = torch.nn.DataParallel(gancraft_bg).cuda()
+        gancraft_fg = torch.nn.DataParallel(gancraft_fg).cuda()
+    else:
+        vqae.device = torch.device("cpu")
+        sampler.device = torch.device("cpu")
+        gancraft_bg.device = torch.device("cpu")
+        gancraft_fg.device = torch.device("cpu")
+
+    # Recover from checkpoints
+    logging.info("Recovering from checkpoints ...")
+    vqae.load_state_dict(sampler_ckpt["vqae"], strict=False)
+    sampler.load_state_dict(sampler_ckpt["sampler"], strict=False)
+    gancraft_bg.load_state_dict(gancraft_bg_ckpt["gancraft_g"], strict=False)
+    gancraft_fg.load_state_dict(gancraft_fg_ckpt["gancraft_g"], strict=False)
+
+    return vqae, sampler, gancraft_bg, gancraft_fg
 
 
 def get_layout_codebook_indexes(sampler, vqae, indexes=None, temperature=1):
@@ -404,36 +436,9 @@ def main(
     sampler_ckpt=None,
     city_osm_dir=None,
 ):
-    # Load checkpoints
-    logging.info("Loading checkpoints ...")
-    sampler_ckpt = torch.load(sampler_ckpt)
-    gancraft_bg_ckpt = torch.load(gancraft_bg_ckpt)
-    gancraft_fg_ckpt = torch.load(gancraft_fg_ckpt)
-
-    # Initialize models
-    logging.info("Initializing models ...")
-    vqae = models.vqgan.VQAutoEncoder(sampler_ckpt["cfg"])
-    sampler = models.sampler.AbsorbingDiffusionSampler(sampler_ckpt["cfg"])
-    gancraft_bg = models.gancraft.GanCraftGenerator(gancraft_bg_ckpt["cfg"])
-    gancraft_fg = models.gancraft.GanCraftGenerator(gancraft_fg_ckpt["cfg"])
-    if torch.cuda.is_available():
-        vqae = torch.nn.DataParallel(vqae).cuda()
-        sampler = torch.nn.DataParallel(sampler).cuda()
-        gancraft_bg = torch.nn.DataParallel(gancraft_bg).cuda()
-        gancraft_fg = torch.nn.DataParallel(gancraft_fg).cuda()
-    else:
-        vqae.device = torch.device("cpu")
-        sampler.device = torch.device("cpu")
-        gancraft_bg.device = torch.device("cpu")
-        gancraft_fg.device = torch.device("cpu")
-
-    # Recover from checkpoints
-    logging.info("Recovering from checkpoints ...")
-    vqae.load_state_dict(sampler_ckpt["vqae"], strict=False)
-    sampler.load_state_dict(sampler_ckpt["sampler"], strict=False)
-    gancraft_bg.load_state_dict(gancraft_bg_ckpt["gancraft_g"], strict=False)
-    gancraft_fg.load_state_dict(gancraft_fg_ckpt["gancraft_g"], strict=False)
-
+    vqae, sampler, gancraft_bg, gancraft_fg = get_models(
+        sampler_ckpt, gancraft_bg_ckpt, gancraft_fg_ckpt
+    )
     # Generate height fields and seg maps
     logging.info("Generating city layouts ...")
     # hf, seg, building_stats = get_city_layout(None, sampler, vqae)
@@ -443,7 +448,9 @@ def main(
 
     # Generate latent codes
     logging.info("Generating latent codes ...")
-    bg_z = get_z(gancraft_bg.output_device, gancraft_bg_ckpt["cfg"].NETWORK.GANCRAFT.STYLE_DIM)
+    bg_z = get_z(
+        gancraft_bg.output_device, gancraft_bg.module.cfg.NETWORK.GANCRAFT.STYLE_DIM
+    )
     building_zs = {
         (i + CONSTANTS["BLD_INS_LABEL_MIN"]) * 2: get_z(gancraft_bg.output_device)
         for i in range(len(building_stats))

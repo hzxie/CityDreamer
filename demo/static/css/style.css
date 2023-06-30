@@ -1,0 +1,99 @@
+.hidden {
+    display: none;
+}
+
+div.imgdrop {
+    border: 1px dotted #ccc;
+    border-radius: 4px;
+    font-size: 16px;
+    text-align: center;
+    padding: 40% 0;
+    position: relative;
+}
+
+div.imgdrop input[type=file] {
+    position: absolute;
+    height: 100%;
+    width: 100%;
+    opacity: 0;
+    top: 0;
+    left: 0;
+}
+
+.ui.container {
+    position: relative;
+}
+
+.ui.column {
+    overflow: hidden;
+}
+
+div#header {
+    border-bottom: 1px solid #dedede;
+    margin-bottom: 40px;
+    padding: 40px 0;
+}
+
+div#header p {
+    color: #666;
+    font-size: 16px;
+}
+
+div#header img {
+    position: absolute;
+    top: -30px;
+    right: 0;
+    width: 180px;
+}
+
+div.step {
+    cursor: pointer;
+}
+
+div.section {
+    border: 1px solid rgba(34,36,38,.15);
+    border-radius: 0.28571429rem;
+    display: none;
+    margin-bottom: 20px;
+    padding: 20px;
+}
+
+div.section.active {
+    display: block;
+}
+
+div#flow-buttons {
+    text-align: right;
+}
+
+div#flow-buttons button {
+    margin: 0 0 0 10px;
+}
+
+#layout-canvas {
+    position: relative;
+}
+
+#layout-canvas label {
+    font-weight: bold;
+}
+
+#layout-canvas canvas {
+    border: 1px dotted #ccc;
+    border-radius: 4px;
+    display: block;
+    width: 100%;
+}
+
+#layout-canvas div.imgdrop {
+    border: none;
+    position: absolute;
+    top: 34px;
+    bottom: 35px;
+    left: 14px;
+    right: 15px;
+}
+
+#layout-canvas .buttons {
+    margin-top: 10px;
+}

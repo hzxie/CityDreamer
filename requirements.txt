@@ -13,4 +13,5 @@ torchvision
 tqdm
 xvfbwrapper
 wandb
+web.py
 
