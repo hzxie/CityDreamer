@@ -17,8 +17,6 @@ setup(
             [
                 "voxlib.cpp",
                 "ray_voxel_intersection.cu",
-                "sp_trilinear_worldcoord_kernel.cu",
-                "positional_encoding_kernel.cu",
             ],
             extra_compile_args={"cxx": cxx_args, "nvcc": nvcc_args},
         )
