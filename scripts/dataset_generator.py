@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-29 19:07:48
+# @Last Modified at: 2023-07-05 11:10:41
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -18,8 +18,8 @@ import pickle
 import sys
 import torch
 
-from tqdm import tqdm
 from PIL import Image
+from tqdm import tqdm
 
 # Disable the warning message for PIL decompression bomb
 # Ref: https://stackoverflow.com/questions/25705773/image-cropping-tool-python
@@ -363,7 +363,7 @@ def _get_google_earth_camera_poses(ge_proj_name, ge_dir):
     return camera_poses
 
 
-def _get_img_patch(img, cx, cy, patch_size):
+def get_img_patch(img, cx, cy, patch_size):
     h, w = img.shape
     x_s, x_e = cx - patch_size // 2, cx + patch_size // 2
     h_s, h_e = cy - patch_size // 2, cy + patch_size // 2
@@ -497,7 +497,7 @@ def get_google_earth_aligned_seg_maps(
             ),
         )
     )
-    part_hf = _get_img_patch(
+    part_hf = get_img_patch(
         height_field,
         tr_cx,
         tr_cy,
@@ -505,7 +505,7 @@ def get_google_earth_aligned_seg_maps(
     ).astype(np.int32)
     # Consider the elevation of the local area
     part_hf += ge_camera_poses["elevation"]
-    part_seg_map = _get_img_patch(
+    part_seg_map = get_img_patch(
         ins_seg_map,
         tr_cx,
         tr_cy,
