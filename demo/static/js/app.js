@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 14:08:59
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-07 18:20:04
+ * @Last Modified at: 2023-07-07 19:15:38
  * @Email:  root@haozhexie.com
  */
 
@@ -26,15 +26,40 @@ function setUpCanvas(canvas, options) {
     })
     // Detect the mouse up and down events
     canvas.isEditMode = false
-    canvas.pointer = {"x": 0, "y": 0}
+    canvas.pointer = {"abs": {"x": 0, "y": 0}, "rel": {"x": 0, "y": 0}}
     canvas.on("mouse:down", function(e) {
         canvas.isMouseDown = true
-        canvas.pointer = e.pointer
+        // rel is used for dragging backgrounds; abs is used for drawing shapes
+        canvas.pointer.rel = e.pointer
+        canvas.pointer.abs = canvas.getPointer(e.pointer)
+        // Remember the initial positions of objects
         if (canvas.backgroundImage) {
             canvas.backgroundImage.origin = {
                 "top": canvas.backgroundImage.top,
                 "left": canvas.backgroundImage.left,
             }
+        }
+        for (let i = 0; i < canvas._objects.length; ++ i) {
+            canvas._objects[i].origin = {
+                "top": canvas._objects[i].top,
+                "left": canvas._objects[i].left
+            }
+        }
+        // Create an initial shape in edit mode
+        if (canvas.isEditMode) {
+            canvas.remove(...canvas.getObjects())
+            canvas.add(new fabric.Rect({
+                "originX": "left",
+                "originY": "top",
+                "left": canvas.pointer.abs.x,
+                "top": canvas.pointer.abs.y,
+                "width": 0,
+                "height": 0,
+                "fill": "rgba(255, 255, 255, .7)",
+                "hasControls": false,
+                "hasBorders": false,
+                "selectable": false
+            }))
         }
     })
     canvas.on("mouse:up", function(e) {
@@ -96,12 +121,17 @@ function setUpCanvas(canvas, options) {
                 return
             }
             let zoom = canvas.getZoom(),
-                deltaX = (e.pointer.x - canvas.pointer.x) / zoom,
-                deltaY = (e.pointer.y - canvas.pointer.y) / zoom
+                // DO NOT USE canvas.getPointer() here
+                pointer = e.pointer,
+                deltaX = (pointer.x - canvas.pointer.rel.x) / zoom,
+                deltaY = (pointer.y - canvas.pointer.rel.y) / zoom
 
             canvas.backgroundImage.top = canvas.backgroundImage.origin.top + deltaY
             canvas.backgroundImage.left = canvas.backgroundImage.origin.left + deltaX
-            canvas.backgroundImage.setCoords()
+            for (let i = 0; i < canvas._objects.length; ++ i) {
+                canvas._objects[i].top = canvas._objects[i].origin.top + deltaY
+                canvas._objects[i].left = canvas._objects[i].origin.left + deltaX
+            }
             canvas.renderAll()
 
             if (options["bind:transform"]) {
@@ -114,7 +144,6 @@ function setUpCanvas(canvas, options) {
                 }
                 bindImg.top = currImg.top * scale
                 bindImg.left = currImg.left * scale
-                bindImg.setCoords()
                 options["bind:transform"].renderAll()
             }
         })
@@ -141,7 +170,23 @@ function setUpCanvas(canvas, options) {
         })
     }
     if (options["drawable"]) {
-        // TODO
+        canvas.on("mouse:move", function(e) {
+            if (!canvas.isEditMode || !canvas.isMouseDown || !canvas.backgroundImage) {
+                return
+            }
+            let uniqueObject = canvas._objects[0],
+                currentPointer = canvas.getPointer(e.pointer)
+
+            if (canvas.pointer.abs.x > currentPointer.x) {
+                uniqueObject.set({left: Math.abs(currentPointer.x)})
+            }
+            if (canvas.pointer.abs.y > currentPointer.y){
+                uniqueObject.set({top: Math.abs(currentPointer.y)})
+            }
+            uniqueObject.set({width: Math.abs(canvas.pointer.abs.x - currentPointer.x)})
+            uniqueObject.set({height: Math.abs(canvas.pointer.abs.y - currentPointer.y)})
+            canvas.renderAll()
+        })
     }
     if (options["normalization"]) {
         canvas.on("object:added", function(e) {
