@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 14:08:59
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-07 11:19:48
+ * @Last Modified at: 2023-07-07 18:20:04
  * @Email:  root@haozhexie.com
  */
 
@@ -17,14 +17,53 @@ String.prototype.format = function() {
 
 function setUpCanvas(canvas, options) {
     canvas.options = options
+    canvas.selection = false
+    canvas.hoverCursor = "pointer"
     // Set up canvas size
     resetCanvasSize(canvas)
     $(window).on("resize", function() {
         resetCanvasSize(canvas)
     })
+    // Detect the mouse up and down events
+    canvas.isEditMode = false
+    canvas.pointer = {"x": 0, "y": 0}
+    canvas.on("mouse:down", function(e) {
+        canvas.isMouseDown = true
+        canvas.pointer = e.pointer
+        if (canvas.backgroundImage) {
+            canvas.backgroundImage.origin = {
+                "top": canvas.backgroundImage.top,
+                "left": canvas.backgroundImage.left,
+            }
+        }
+    })
+    canvas.on("mouse:up", function(e) {
+        canvas.isMouseDown = false
+    })
+    // Sync the background image to another canvas
+    if (options["bind:destination"]) {
+        canvas.on("object:added", function(e) {
+            let element = e.target._element ? e.target._element.className : ""
+            if (element === "canvas-img") {
+                fabric.Image.fromURL(e.target.getSrc(), function(img) {
+                    options["bind:destination"].setBackgroundImage(
+                        img,
+                        options["bind:destination"].renderAll.bind(options["bind:destination"]),
+                        {
+                            originX: 'left',
+                            originY: 'top',
+                            left: 0,
+                            top: 0,
+                            scaleX: options["bind:destination"].width / img.width,
+                            scaleY: options["bind:destination"].height / img.height
+                        }
+                    )
+                })
+            }
+        })
+    }
     // Set up zoom in and out functions
     if (options["zoomable"]) {
-        canvas.hoverCursor = "pointer"
         canvas.on("mouse:wheel", function(opt) {
             let delta = opt.e.deltaY,
                 zoom = canvas.getZoom()
@@ -51,37 +90,71 @@ function setUpCanvas(canvas, options) {
             opt.e.preventDefault()
             opt.e.stopPropagation()
         })
-    }
-    if (options["bind:transform"]) {
-        canvas.on("object:moving", function(e) {
-            let currImg = e.target.canvas._objects[0],
-                bindImg = options["bind:transform"]._objects[0],
-                scale = options["bind:transform"].width / e.target.canvas.width
-
-            if (currImg === undefined || bindImg === undefined ||
-                currImg._element.className !== "canvas-img" ||
-                bindImg._element.className !== "canvas-img") {
+        // Set up handlers for dragging in the background
+        canvas.on("mouse:move", function(e) {
+            if (canvas.isEditMode || !canvas.isMouseDown || !canvas.backgroundImage) {
                 return
             }
-            // Move the image object on the binded canvas
-            bindImg.top = currImg.top * scale
-            bindImg.left = currImg.left * scale
-            bindImg.setCoords()
-            options["bind:transform"].renderAll()
+            let zoom = canvas.getZoom(),
+                deltaX = (e.pointer.x - canvas.pointer.x) / zoom,
+                deltaY = (e.pointer.y - canvas.pointer.y) / zoom
+
+            canvas.backgroundImage.top = canvas.backgroundImage.origin.top + deltaY
+            canvas.backgroundImage.left = canvas.backgroundImage.origin.left + deltaX
+            canvas.backgroundImage.setCoords()
+            canvas.renderAll()
+
+            if (options["bind:transform"]) {
+                let currImg = canvas.backgroundImage,
+                    bindImg = options["bind:transform"].backgroundImage,
+                    scale = options["bind:transform"].width / canvas.width
+                
+                if (currImg === null || bindImg === null) {
+                    return
+                }
+                bindImg.top = currImg.top * scale
+                bindImg.left = currImg.left * scale
+                bindImg.setCoords()
+                options["bind:transform"].renderAll()
+            }
         })
+    }
+    if (options["editable"]) {
+        let container = $(canvas.lowerCanvasEl).parent()
+        $(container).append("<span class='mode hidden'>Edit Mode</span>")
+
+        $(window).on("keydown", function(e) {
+            let key = e.keyCode || e.which
+            if (key === 17) { // CTRL is pressed
+                $(".mode", container).removeClass("hidden")
+                canvas.isEditMode = true
+                canvas.forEachObject(function(o) {o.evented = false; o.selectable = false})
+            }
+        })
+        $(window).on("keyup", function(e) {
+            let key = e.keyCode || e.which
+            if (key === 17) { // CTRL is released
+                $(".mode", container).addClass("hidden")
+                canvas.isEditMode = false
+                canvas.forEachObject(function(o) {o.evented = true; o.selectable = true})
+            }
+        })
+    }
+    if (options["drawable"]) {
+        // TODO
     }
     if (options["normalization"]) {
         canvas.on("object:added", function(e) {
             let container = $(e.target.canvas.lowerCanvasEl).parent().parent(),
-                imgDrop = $("input[type=file]", container)
+                imgDrop = $("input[type=file]", container),
+                element = e.target._element ? e.target._element.className : ""
 
-            if (e.target._element.className !== "canvas-img") {
+            if (element !== "canvas-img") {
                 return
             }
             if ($(imgDrop).attr("scale") !== undefined) {
                 return
             }
-            // Normalize image
             let formData = new FormData()
             formData.append("image", imgDrop[0].files[0])
             $.ajax({
@@ -92,12 +165,19 @@ function setUpCanvas(canvas, options) {
                 contentType: false,
             }).done(function(resp) {
                 $(imgDrop).attr("scale", resp["scale"])
-                canvas.clear()
                 fabric.Image.fromURL("/img/get-normalized/" + resp["filename"], function(img) {
-                    img.hasControls = img.hasBorders = false
-                    img.selectable = false
-                    img.scaleToWidth(container.width(), false)
-                    canvas.add(img)
+                    canvas.setBackgroundImage(
+                        img,
+                        canvas.renderAll.bind(canvas),
+                        {
+                            originX: 'left',
+                            originY: 'top',
+                            left: 0,
+                            top: 0,
+                            scaleX: canvas.width / img.width,
+                            scaleY: canvas.height / img.height
+                        }
+                    )
                 })
             })
         })
@@ -141,20 +221,21 @@ $(function() {
     hfCanvas = new fabric.Canvas("hf-canvas")
     camTrjCanvas = new fabric.Canvas("cam-trj-canvas")
     setUpCanvas(segMapCanvas, {
-        "maskable": true,
-        "movable": true,
+        "drawable": true,
+        "editable": true,
         "zoomable": true,
-        "bind:transform": hfCanvas
+        "bind:transform": hfCanvas,
+        "bind:destination": camTrjCanvas
     })
     setUpCanvas(hfCanvas, {
-        "movable": true,
         "zoomable": true,
         "normalization": true,
         "bind:transform": segMapCanvas
     })
     setUpCanvas(camTrjCanvas, {
         "delegate": segMapCanvas,
-        "movable": true,
+        "drawable": true,
+        "editable": true,
         "zoomable": true,
     })
     // Set up image uploaders

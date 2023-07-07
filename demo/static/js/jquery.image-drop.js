@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 15:37:23
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-06 20:34:23
+ * @Last Modified at: 2023-07-07 15:23:49
  * @Email:  root@haozhexie.com
  */
 
@@ -33,9 +33,19 @@
             if (options["viewer"] !== undefined) {
                 options["viewer"].clear()
                 fabric.Image.fromURL(imgUrl, function(img) {
-                    img.hasControls = img.hasBorders = false
-                    img.scaleToWidth(container.width(), false)
-                    options["viewer"].add(img)
+                    options["viewer"].setBackgroundImage(
+                        img,
+                        options["viewer"].renderAll.bind(options["viewer"]), 
+                        {
+                            originX: 'left',
+                            originY: 'top',
+                            left: 0,
+                            top: 0,
+                            scaleX: options["viewer"].width / img.width,
+                            scaleY: options["viewer"].height / img.height
+                        }
+                    )
+                    options["viewer"].fire("object:added", {target: img})
                 })
             }
             if (options["hideAfterUpload"]) {
