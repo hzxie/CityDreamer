@@ -1,5 +1,6 @@
 easydict
 einops
+flask
 lxml
 matplotlib
 mayavi
@@ -13,5 +14,3 @@ torchvision
 tqdm
 xvfbwrapper
 wandb
-web.py
-

@@ -70,22 +70,33 @@ div#flow-buttons button {
     margin: 0 0 0 10px;
 }
 
-#layout-canvas {
-    position: relative;
-}
-
-#layout-canvas label {
+.layout.section label,
+.trajectory.section label {
     font-weight: bold;
 }
 
-#layout-canvas canvas {
+.layout.section .canvas-container span.mode,
+.trajectory.section .canvas-container span.mode {
+    background-color: #fff;
+    padding: 2px 5px;
+    position: absolute;
+    top: 1px;
+    right: 1px;
+}
+
+.layout.section canvas,
+.trajectory.section canvas {
     border: 1px dotted #ccc;
     border-radius: 4px;
     display: block;
     width: 100%;
 }
 
-#layout-canvas div.imgdrop {
+.layout.section {
+    position: relative;
+}
+
+.layout.section div.imgdrop {
     border: none;
     position: absolute;
     top: 34px;
@@ -94,6 +105,6 @@ div#flow-buttons button {
     right: 15px;
 }
 
-#layout-canvas .buttons {
+.layout.section .buttons {
     margin-top: 10px;
 }

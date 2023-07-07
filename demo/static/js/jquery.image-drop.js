@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 15:37:23
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-06-30 16:49:08
+ * @Last Modified at: 2023-07-06 20:34:23
  * @Email:  root@haozhexie.com
  */
 
@@ -27,20 +27,19 @@
             container.css("height", container.width())
         }
 
-        container.append("<input type='file'>");
+        container.append("<input type='file'>")
         container.on("change", "input[type=file]", function(evt) {
             let imgUrl = URL.createObjectURL(evt.target.files[0])
             if (options["viewer"] !== undefined) {
                 options["viewer"].clear()
                 fabric.Image.fromURL(imgUrl, function(img) {
                     img.hasControls = img.hasBorders = false
-                    img.selectable = false
                     img.scaleToWidth(container.width(), false)
                     options["viewer"].add(img)
                 })
             }
             if (options["hideAfterUpload"]) {
-                container.addClass("hidden")
+                container.addClass("hidden uploaded")
             }
         });
         return this;

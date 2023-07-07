@@ -107,14 +107,35 @@
                                 Drag Seg. Map here
                             </div> <!-- #hf-uploader -->
                             <div class="ui buttons">
-                                <button class="ui attached button">Reset Zoom</button>
-                                <button class="ui attached button">100%</button>
+                                <button class="ui reset button">Reset Zoom</button>
+                                <button class="ui clear red button">Clear Mask</button>
                             </div> <!-- .buttons -->
                         </div> <!-- .five.wide.column -->
                     </div> <!-- .equal.width.grid -->
                 </div> <!-- #layout-section -->
                 <div class="trajectory section">
-                    Trajectory Section
+                    <div class="ui grid">
+                        <div class="eleven wide column">
+                            <label>Keyframe Selector</label>
+                            <canvas id="cam-trj-canvas"></canvas>
+                        </div> <!-- .eleven.wide.column -->
+                        <div class="five wide column">
+                            <form class="ui form">
+                                <div class="field">
+                                    <label>Preview</label>
+                                </div> <!-- .field -->
+                                <div class="field">
+                                    <label>Trajectory Presets</label>
+                                </div> <!-- .field -->
+                                <div class="field">
+                                    <label>Parameters</label>
+                                </div> <!-- .field -->
+                            </form>
+                        </div> <!-- .five.wide.column -->
+                        <div class="sixteen wide column">
+                            <label>Keyframes</label>
+                        </div> <!-- .five.wide.column -->
+                    </div> <!-- .grid -->
                 </div> <!-- #trajectory-section -->
                 <div class="render section">
                     Render Section
