@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-07-05 09:59:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-10 19:30:30
+# @Last Modified at: 2023-07-10 20:52:29
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -115,13 +115,13 @@ def _get_cleaned_roof_footage(footage, raycasting, roofs):
         roof_img[my : my + mh, mx : mx + mw] = roof_texture[ry : ry + mh, rx : rx + mw]
 
         # Make the border of roof more smooth
-        roof_mask = cv2.GaussianBlur(
-            roof_mask.astype(np.uint8), (0, 0), sigmaX=3, sigmaY=3
-        )
-        roof_mask = cv2.dilate(roof_mask, np.ones((7, 7), dtype=np.uint8))
-        roof_mask = cv2.erode(roof_mask, np.ones((7, 7), dtype=np.uint8))
-        roof_mask = cv2.GaussianBlur(roof_mask, (0, 0), sigmaX=1, sigmaY=1)
-        roof_mask = roof_mask[..., None]
+        # roof_mask = cv2.GaussianBlur(
+        #     roof_mask.astype(np.uint8), (0, 0), sigmaX=3, sigmaY=3
+        # )
+        # roof_mask = cv2.dilate(roof_mask, np.ones((7, 7), dtype=np.uint8))
+        # roof_mask = cv2.erode(roof_mask, np.ones((7, 7), dtype=np.uint8))
+        # roof_mask = cv2.GaussianBlur(roof_mask, (0, 0), sigmaX=1, sigmaY=1)
+        # roof_mask = roof_mask[..., None]
         # Replace roof textures
         footage = footage * (1 - roof_mask) + roof_img * roof_mask
 
@@ -155,9 +155,7 @@ def replace_roof_texture(footage_dir, raycasting_dir, roof_textures):
     # Replace the roofs with cleaner ones
     for filename, footage, raycasting in zip(footage_files, footages, raycastings):
         footage = _get_cleaned_roof_footage(footage, raycasting, roofs)
-        footage = cv2.imwrite(
-            os.path.join(footage_dir, filename), footage.astype(np.uint8)
-        )
+        cv2.imwrite(os.path.join(footage_dir, filename), footage.astype(np.uint8))
 
 
 def main(ges_dir, roof_img_dir, city="US-NewYork", n_processes=8):
@@ -167,32 +165,31 @@ def main(ges_dir, roof_img_dir, city="US-NewYork", n_processes=8):
             tqdm(
                 pool.imap(downsample_texture, roof_files),
                 total=len(roof_files),
-                desc="Load roof texture",
             )
         )
 
     ges_projects = sorted([gp for gp in os.listdir(ges_dir) if gp.startswith(city)])
     # Single-threaded
-    # for gp in ges_projects:
-    #     replace_roof_texture(
-    #         os.path.join(ges_dir, gp, "footage"),
-    #         os.path.join(ges_dir, gp, "raycasting"),
-    #         roof_textures,
-    #     )
+    for gp in tqdm(ges_projects):
+        replace_roof_texture(
+            os.path.join(ges_dir, gp, "footage"),
+            os.path.join(ges_dir, gp, "raycasting"),
+            roof_textures,
+        )
     # Multi-threaded
-    with multiprocessing.Pool(n_processes) as pool:
-        args = zip(
-            [os.path.join(ges_dir, gp, "footage") for gp in ges_projects],
-            [os.path.join(ges_dir, gp, "raycasting") for gp in ges_projects],
-            [roof_textures for _ in ges_projects],
-        )
-        pool.starmap(
-            replace_roof_texture,
-            tqdm(
-                args,
-                total=len(ges_projects),
-            ),
-        )
+    # with multiprocessing.Pool(n_processes) as pool:
+    #     args = zip(
+    #         [os.path.join(ges_dir, gp, "footage") for gp in ges_projects],
+    #         [os.path.join(ges_dir, gp, "raycasting") for gp in ges_projects],
+    #         [roof_textures for _ in ges_projects],
+    #     )
+    #     pool.starmap(
+    #         replace_roof_texture,
+    #         tqdm(
+    #             args,
+    #             total=len(ges_projects),
+    #         ),
+    #     )
 
 
 if __name__ == "__main__":
