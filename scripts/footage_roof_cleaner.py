@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-07-05 09:59:13
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-10 19:10:20
+# @Last Modified at: 2023-07-10 19:30:30
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -132,12 +132,13 @@ def replace_roof_texture(footage_dir, raycasting_dir, roof_textures):
     if not os.path.exists(raycasting_dir):
         logging.warning("No raycasting found in %s" % (raycasting_dir))
         return
+
     # IO cache
+    footage_files = sorted(os.listdir(footage_dir))
+    raycasting_files = sorted(os.listdir(raycasting_dir))
     footages = []
     raycastings = []
-    for f, r in zip(
-        sorted(os.listdir(footage_dir)), sorted(os.listdir(raycasting_dir))
-    ):
+    for f, r in zip(footage_files, raycasting_files):
         footages.append(cv2.imread(os.path.join(footage_dir, f)))
         with open(os.path.join(raycasting_dir, r), "rb") as fp:
             raycastings.append(pickle.load(fp))
@@ -152,9 +153,11 @@ def replace_roof_texture(footage_dir, raycasting_dir, roof_textures):
         roofs[ins] = _get_roof_texture(colors, roof_textures)
 
     # Replace the roofs with cleaner ones
-    for footage, raycasting in zip(footages, raycastings):
+    for filename, footage, raycasting in zip(footage_files, footages, raycastings):
         footage = _get_cleaned_roof_footage(footage, raycasting, roofs)
-        footage = cv2.imwrite(os.path.join(footage_dir, f), footage.astype(np.uint8))
+        footage = cv2.imwrite(
+            os.path.join(footage_dir, filename), footage.astype(np.uint8)
+        )
 
 
 def main(ges_dir, roof_img_dir, city="US-NewYork", n_processes=8):
@@ -181,7 +184,7 @@ def main(ges_dir, roof_img_dir, city="US-NewYork", n_processes=8):
         args = zip(
             [os.path.join(ges_dir, gp, "footage") for gp in ges_projects],
             [os.path.join(ges_dir, gp, "raycasting") for gp in ges_projects],
-            [roof_textures for _ in ges_projects]
+            [roof_textures for _ in ges_projects],
         )
         pool.starmap(
             replace_roof_texture,
