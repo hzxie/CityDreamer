@@ -8,6 +8,7 @@ numpy
 opencv-python
 pillow
 pynvml
+scipy
 tensorboard
 torch
 torchvision
