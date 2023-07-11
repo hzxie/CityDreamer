@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-05 11:10:41
+# @Last Modified at: 2023-07-11 09:35:47
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -14,6 +14,7 @@ import logging
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+import perlin_numpy
 import pickle
 import sys
 import torch
@@ -242,7 +243,13 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     if coast_zones is not None:
         height_field[coast_zones != 0] = HEIGHTS["COAST_ZONES"]
     if green_lands is not None:
-        height_field[green_lands != 0] = HEIGHTS["GREEN_LANDS"]
+        green_lands[green_lands != 0] = 1
+        # Generate random height field for green lands
+        random_hf_shape = np.ceil(np.array(green_lands.shape).astype(float) / 64).astype(int) * 64
+        random_hf = perlin_numpy.generate_perlin_noise_2d(random_hf_shape, random_hf_shape // 64)
+        random_hf = (random_hf + 1) * HEIGHTS["GREEN_LANDS"] + HEIGHTS["GREEN_LANDS"]
+        random_hf = random_hf[height_field.shape]
+        height_field = height_field * (1 - green_lands) + random_hf * green_lands
     # Follow the order in plotting seg maps
     height_field = utils.osm_helper.plot_footprints(
         "height_field",
