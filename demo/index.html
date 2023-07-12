@@ -17,12 +17,16 @@
             <div class="ui horizontal list">
                 <div class="item">
                   <div class="content">
-                    <a href="https://github.com/hzxie/city-dreamer" target="_blank"><i class="github icon"></i> Source Code</a>
+                    <a href="https://github.com/hzxie/city-dreamer" target="_blank">
+                        <i class="github icon"></i> Source Code
+                    </a>
                   </div> <!-- .content -->
                 </div> <!-- .item -->
                 <div class="item">
                   <div class="content">
-                    <a href="https://haozhexie.com/project/city-dreamer" target="_blank"><i class="home icon"></i> Project Page</a>
+                    <a href="https://haozhexie.com/project/city-dreamer" target="_blank">
+                        <i class="home icon"></i> Project Page
+                    </a>
                   </div> <!-- .content -->
                 </div> <!-- .item -->
             </div> <!-- .horizontal.list -->
@@ -78,11 +82,11 @@
                                 <div class="five wide field">
                                     <label>Layout Size</label>
                                     <select id="layout-size" class="ui dropdown">
-                                        <option value="1536">1536x1536</option>
                                         <option value="2048">2048x2048</option>
-                                        <option value="3072">3072x3072</option>
                                         <option value="4096">4096x4096</option>
-                                        <option value="6144">6144x6144</option>
+                                        <option value="8192">8192x8192</option>
+                                        <option value="16384">16384x16384</option>
+                                        <option value="32768">32768x32768</option>
                                     </select>
                                 </div> <!-- .five.wide.field -->
                                 <div class="two wide field">
@@ -99,6 +103,7 @@
                             <div id="seg-map-uploader" class="imgdrop hidden">
                                 Drag Seg. Map here
                             </div> <!-- #seg-map-uploader -->
+                            <p>Press and hold the Ctrl/Command key to enter the edit mode.</p>
                         </div> <!-- .eleven.wide.column -->
                         <div class="five wide column">
                             <label>Height Field</label>
@@ -106,10 +111,6 @@
                             <div id="hf-uploader" class="imgdrop hidden">
                                 Drag Seg. Map here
                             </div> <!-- #hf-uploader -->
-                            <div class="ui buttons">
-                                <button class="ui reset button">Reset Zoom</button>
-                                <button class="ui clear red button">Clear Mask</button>
-                            </div> <!-- .buttons -->
                         </div> <!-- .five.wide.column -->
                     </div> <!-- .equal.width.grid -->
                 </div> <!-- #layout-section -->
@@ -118,22 +119,34 @@
                         <div class="eleven wide column">
                             <label>Keyframe Selector</label>
                             <canvas id="cam-trj-canvas"></canvas>
+                            <p>Press and hold the Ctrl/Command key to enter the edit mode.</p>
                         </div> <!-- .eleven.wide.column -->
                         <div class="five wide column">
                             <form class="ui form">
                                 <div class="field">
-                                    <label>Preview</label>
+                                    <label>Trajectory Mode</label>
+                                    <select id="trajectory-mode" class="ui dropdown">
+                                        <option value=""></option>
+                                        <option value="orbit">Orbit</option>
+                                        <option value="p2p">Point to Point</option>
+                                        <option value="keypoints">Keypoints</option>
+                                    </select>
                                 </div> <!-- .field -->
                                 <div class="field">
-                                    <label>Trajectory Presets</label>
+                                    <label>Camera Altitude</label>
+                                    <div id="camera-altitude" class="ui slider">
+                                        <p><span class="value"></span> m</p>
+                                    </div> <!-- #camera-altitude -->
                                 </div> <!-- .field -->
                                 <div class="field">
-                                    <label>Parameters</label>
+                                    <label>Elevation Angle</label>
+                                    <div id="elevation-altitude" class="ui slider">
+                                        <p><span class="value"></span> &deg;</p>
+                                    </div> <!-- #elevation-altitude -->
                                 </div> <!-- .field -->
+                                <button class="ui fluid primary button">Preview Trajectory</button>
+                                <button class="ui fluid red button hidden">Remove Last Keypoint</button>
                             </form>
-                        </div> <!-- .five.wide.column -->
-                        <div class="sixteen wide column">
-                            <label>Keyframes</label>
                         </div> <!-- .five.wide.column -->
                     </div> <!-- .grid -->
                 </div> <!-- #trajectory-section -->

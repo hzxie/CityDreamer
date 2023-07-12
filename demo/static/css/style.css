@@ -1,5 +1,5 @@
 .hidden {
-    display: none;
+    display: none!important;
 }
 
 div.imgdrop {
@@ -105,6 +105,14 @@ div#flow-buttons button {
     right: 15px;
 }
 
-.layout.section .buttons {
-    margin-top: 10px;
+.trajectory.section .slider > p {
+    color: #666;
+    font-size: 12px;
+    position: absolute;
+    top: -25px;
+    right: 0;
+}
+
+.trajectory.section .button {
+    margin-bottom: 10px;
 }

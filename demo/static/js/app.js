@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 14:08:59
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-07 19:15:38
+ * @Last Modified at: 2023-07-12 10:15:27
  * @Email:  root@haozhexie.com
  */
 
@@ -47,23 +47,74 @@ function setUpCanvas(canvas, options) {
         }
         // Create an initial shape in edit mode
         if (canvas.isEditMode) {
-            canvas.remove(...canvas.getObjects())
-            canvas.add(new fabric.Rect({
-                "originX": "left",
-                "originY": "top",
+            options = {
                 "left": canvas.pointer.abs.x,
                 "top": canvas.pointer.abs.y,
-                "width": 0,
-                "height": 0,
-                "fill": "rgba(255, 255, 255, .7)",
                 "hasControls": false,
                 "hasBorders": false,
                 "selectable": false
-            }))
+            }
+            if (canvas.shape == "rect") {
+                canvas.remove(...canvas.getObjects())
+                canvas.add(new fabric.Rect(Object.assign(options, {
+                    "width": 0,
+                    "height": 0,
+                    "fill": "rgba(255, 255, 255, .7)"
+                })))
+            } else if (canvas.shape == "circle") {
+                canvas.remove(...canvas.getObjects())
+                canvas.add(new fabric.Circle(Object.assign(options, {
+                    "radius": 0,
+                    "fill": "rgba(0, 0, 0, 0)",
+                    "stroke": "rgba(255, 255, 255, .5)",
+                    "strokeWidth": 4
+                })))
+            } else if (canvas.shape == "line") {
+                canvas.remove(...canvas.getObjects())
+                canvas.add(new fabric.Line([
+                    options["left"], options["top"], options["left"], options["top"]
+                ], Object.assign(options, {
+                    "stroke": "rgba(255, 255, 255, .5)",
+                    "strokeWidth": 4
+                })))
+            } else if (canvas.shape == "polyline") {
+                if (canvas._objects[0].points === undefined) {
+                    canvas.remove(...canvas.getObjects())
+                }
+                canvas.add(new fabric.Polyline([
+                    {"x": options["left"], "y": options["top"]},
+                    {"x": options["left"], "y": options["top"]}
+                ], Object.assign(options, {
+                    "fill": "rgba(0, 0, 0, 0)",
+                    "stroke": "rgba(255, 255, 255, .5)",
+                    "strokeWidth": 4,
+                    "objectCaching": false
+                })))
+            }
         }
     })
     canvas.on("mouse:up", function(e) {
         canvas.isMouseDown = false
+        // abs is used for drawing shapes
+        canvas.pointer.abs = canvas.getPointer(e.pointer)
+        if (canvas.isEditMode) {
+            if (canvas.shape == "polyline") {
+                let uniqueObject = canvas._objects[0],
+                    nPoints = uniqueObject.points.length
+
+                uniqueObject.points[nPoints - 1] = canvas.pointer.abs
+                // Avoid appending duplicate points
+                if (nPoints >= 2) {
+                    let lastPoint = uniqueObject.points[nPoints - 1],
+                        last2Point = uniqueObject.points[nPoints - 2]
+
+                    if (lastPoint.x != last2Point.x || lastPoint.y != last2Point.y) {
+                        uniqueObject.points.push(canvas.pointer.abs)
+                    }
+                }
+            }
+        }
+        canvas.renderAll()
     })
     // Sync the background image to another canvas
     if (options["bind:destination"]) {
@@ -153,16 +204,18 @@ function setUpCanvas(canvas, options) {
         $(container).append("<span class='mode hidden'>Edit Mode</span>")
 
         $(window).on("keydown", function(e) {
-            let key = e.keyCode || e.which
-            if (key === 17) { // CTRL is pressed
+            let key = e.keyCode || e.which,
+                expectedKeys = [17, 91, 93, 224]
+            if (expectedKeys.includes(key)) { // CTRL / Command is pressed
                 $(".mode", container).removeClass("hidden")
                 canvas.isEditMode = true
                 canvas.forEachObject(function(o) {o.evented = false; o.selectable = false})
             }
         })
         $(window).on("keyup", function(e) {
-            let key = e.keyCode || e.which
-            if (key === 17) { // CTRL is released
+            let key = e.keyCode || e.which,
+                expectedKeys = [17, 91, 93, 224]
+            if (expectedKeys.includes(key)) { // CTRL / Command is pressed
                 $(".mode", container).addClass("hidden")
                 canvas.isEditMode = false
                 canvas.forEachObject(function(o) {o.evented = true; o.selectable = true})
@@ -177,14 +230,35 @@ function setUpCanvas(canvas, options) {
             let uniqueObject = canvas._objects[0],
                 currentPointer = canvas.getPointer(e.pointer)
 
-            if (canvas.pointer.abs.x > currentPointer.x) {
-                uniqueObject.set({left: Math.abs(currentPointer.x)})
+            // Update canvas shape on mouse move
+            if (canvas.shape === "polyline") {
+                uniqueObject.points[uniqueObject.points.length - 1] = currentPointer
+            } else if (canvas.shape) {
+                if (canvas.pointer.abs.x > currentPointer.x) {
+                    uniqueObject.set({left: Math.abs(currentPointer.x)})
+                }
+                if (canvas.pointer.abs.y > currentPointer.y){
+                    uniqueObject.set({top: Math.abs(currentPointer.y)})
+                }
+                if (canvas.shape === "rect") {
+                    uniqueObject.set({
+                        "width": Math.abs(canvas.pointer.abs.x - currentPointer.x),
+                        "height": Math.abs(canvas.pointer.abs.y - currentPointer.y)
+                    })
+                } else if (canvas.shape === "circle") {
+                    let deltaX = canvas.pointer.abs.x - currentPointer.x,
+                        deltaY = canvas.pointer.abs.y - currentPointer.y
+    
+                    uniqueObject.set({
+                        "radius": Math.sqrt(deltaX * deltaX + deltaY * deltaY) / Math.sqrt(2) / 2
+                    })
+                } else if (canvas.shape === "line") {
+                    uniqueObject.set({
+                        "x2": currentPointer.x,
+                        "y2": currentPointer.y
+                    })
+                }
             }
-            if (canvas.pointer.abs.y > currentPointer.y){
-                uniqueObject.set({top: Math.abs(currentPointer.y)})
-            }
-            uniqueObject.set({width: Math.abs(canvas.pointer.abs.x - currentPointer.x)})
-            uniqueObject.set({height: Math.abs(canvas.pointer.abs.y - currentPointer.y)})
             canvas.renderAll()
         })
     }
@@ -241,61 +315,122 @@ function resetCanvasSize(canvas) {
     canvas.renderAll()
 }
 
-$(function() {
-    $(".layout.step").addClass("active")
-    $(".layout.section").addClass("active")
-    // Set up dropdowns
-    $(".dropdown").dropdown()
-    $("#layout-data-src").on("change", function() {
-        $(".five.wide.field", ".layout.section .fields").addClass("hidden")
-        $(".two.wide.field", ".layout.section .fields").addClass("hidden")
-        $(".imgdrop").addClass("hidden")
-        if ($(this).val() == "generator") {
-            $(".five.wide.field", ".layout.section .fields").removeClass("hidden")
-            $(".two.wide.field", ".layout.section .fields").removeClass("hidden")
-        } else if ($(this).val() == "osm") {
-            $(".imgdrop").each(function() {
-                if (!$(this).hasClass("uploaded")) {
-                    $(this).removeClass("hidden")
-                }
-            })
-        }
-    })
-    // Set up canvas
-    segMapCanvas = new fabric.Canvas("seg-map-canvas")
-    hfCanvas = new fabric.Canvas("hf-canvas")
-    camTrjCanvas = new fabric.Canvas("cam-trj-canvas")
-    setUpCanvas(segMapCanvas, {
-        "drawable": true,
-        "editable": true,
-        "zoomable": true,
-        "bind:transform": hfCanvas,
-        "bind:destination": camTrjCanvas
-    })
-    setUpCanvas(hfCanvas, {
-        "zoomable": true,
-        "normalization": true,
-        "bind:transform": segMapCanvas
-    })
-    setUpCanvas(camTrjCanvas, {
-        "delegate": segMapCanvas,
-        "drawable": true,
-        "editable": true,
-        "zoomable": true,
-    })
-    // Set up image uploaders
-    $("#seg-map-uploader").imgdrop({
-        "viewer": segMapCanvas
-    })
-    $("#hf-uploader").imgdrop({
-        "viewer": hfCanvas
-    })
-})
-
+// Set up active step on the left
+$(".layout.step").addClass("active")
+$(".layout.section").addClass("active")
 $(".step").on("click", function() {
     let currentStep = $(this).attr("class").split(" ")[0]
     $(".step").removeClass("active")
     $(".section").removeClass("active")
     $(".%s.step".format(currentStep)).addClass("active")
     $(".%s.section".format(currentStep)).addClass("active")
+})
+
+// Set up sliders
+$("#camera-altitude").slider({
+    min: 128,
+    max: 778,
+    smooth: true,
+    onChange: function() {
+        $(".value", this).html($(this).slider("get value"))
+    }
+})
+$("#camera-altitude").slider("set value", 353)
+$("#elevation-altitude").slider({
+    min: 30,
+    max: 60,
+    smooth: true,
+    onChange: function() {
+        $(".value", this).html($(this).slider("get value"))
+    }
+})
+$("#elevation-altitude").slider("set value", 45)
+
+// Set up canvas
+segMapCanvas = new fabric.Canvas("seg-map-canvas")
+hfCanvas = new fabric.Canvas("hf-canvas")
+camTrjCanvas = new fabric.Canvas("cam-trj-canvas")
+setUpCanvas(segMapCanvas, {
+    "drawable": true,
+    "editable": true,
+    "zoomable": true,
+    "bind:transform": hfCanvas,
+    "bind:destination": camTrjCanvas
+})
+setUpCanvas(hfCanvas, {
+    "zoomable": true,
+    "normalization": true,
+    "bind:transform": segMapCanvas
+})
+setUpCanvas(camTrjCanvas, {
+    "delegate": segMapCanvas,
+    "drawable": true,
+    "editable": true,
+    "zoomable": false,
+})
+    
+// Set up image uploaders
+$("#seg-map-uploader").imgdrop({
+    "viewer": segMapCanvas
+})
+$("#hf-uploader").imgdrop({
+    "viewer": hfCanvas
+})
+
+// Set up initial shape in canvas
+segMapCanvas.shape = "rect"
+$("#trajectory-mode").on("change", function() {
+    $(".red.button", ".trajectory.section").addClass("hidden")
+    if ($(this).val() == "orbit") {
+        camTrjCanvas.shape = "circle"
+    } else if ($(this).val() == "p2p") {
+        camTrjCanvas.shape = "line"
+    } else if ($(this).val() == "keypoints") {
+        camTrjCanvas.shape = "polyline"
+        $(".red.button", ".trajectory.section").removeClass("hidden")
+    }
+})
+
+// Set up dropdowns
+$(".dropdown").dropdown()
+$("#layout-data-src").on("change", function() {
+    $(".five.wide.field", ".layout.section .fields").addClass("hidden")
+    $(".two.wide.field", ".layout.section .fields").addClass("hidden")
+    $(".imgdrop").addClass("hidden")
+    if ($(this).val() == "generator") {
+        $(".five.wide.field", ".layout.section .fields").removeClass("hidden")
+        $(".two.wide.field", ".layout.section .fields").removeClass("hidden")
+    } else if ($(this).val() == "osm") {
+        $(".imgdrop").each(function() {
+            if (!$(this).hasClass("uploaded")) {
+                $(this).removeClass("hidden")
+            }
+        })
+    }
+})
+
+// Set up events on button clicks
+$(".red.button", ".trajectory.section").on("click", function(e) {
+    e.preventDefault()
+    if (camTrjCanvas.shape !== "polyline")  {
+        return
+    }
+
+    let uniqueObject = camTrjCanvas._objects[0]
+    if (uniqueObject) {
+        if (uniqueObject.points.length <= 2) {
+            camTrjCanvas.remove(...camTrjCanvas.getObjects())
+        } else {
+            let nPoints = uniqueObject.points.length,
+                lastPoint = uniqueObject.points[nPoints - 1],
+                last2Point = uniqueObject.points[nPoints - 2]
+
+            if (lastPoint.x == last2Point.x && lastPoint.y == last2Point.y) {
+                // Remove duplicated points
+                uniqueObject.points.pop()
+            }
+            uniqueObject.points.pop()
+        }
+        camTrjCanvas.renderAll()
+    }
 })
