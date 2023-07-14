@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 15:37:23
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-07 15:23:49
+ * @Last Modified at: 2023-07-12 14:51:38
  * @Email:  root@haozhexie.com
  */
 
@@ -14,7 +14,8 @@
             "width": undefined,
             "height": undefined,
             "viewer": undefined,
-            "url": undefined,
+            "putUrl": undefined,
+            "getUrl": undefined,
             "hideAfterUpload": true
         }, options)
 
@@ -29,9 +30,30 @@
 
         container.append("<input type='file'>")
         container.on("change", "input[type=file]", function(evt) {
-            let imgUrl = URL.createObjectURL(evt.target.files[0])
+            let filename = undefined
+            if (options["putUrl"] != undefined && options["getUrl"] != undefined) {
+                let formData = new FormData()
+                formData.append("image", evt.target.files[0])
+                $.ajax({
+                    "async": false,
+                    "url": options["putUrl"],
+                    "type": "POST",
+                    "data": formData,
+                    "processData": false,
+                    "contentType": false,
+                }).done(function(resp) {
+                    filename = resp["filename"]
+                })
+            }
             if (options["viewer"] !== undefined) {
                 options["viewer"].clear()
+                if (filename) {
+                    options["viewer"].filename = filename
+                }
+
+                let imgUrl = filename ?
+                             options["getUrl"] + filename :
+                             URL.createObjectURL(evt.target.files[0])
                 fabric.Image.fromURL(imgUrl, function(img) {
                     options["viewer"].setBackgroundImage(
                         img,

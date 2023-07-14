@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-29 20:11:11
+# @Last Modified at: 2023-07-14 20:05:16
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -149,6 +149,14 @@ def get_image_patch(image, cx, cy, patch_size):
     ex = sx + patch_size
     ey = sy + patch_size
     return image[sy:ey, sx:ex]
+
+
+def get_part_hf_seg(hf, seg, cx, cy):
+    part_hf = get_image_patch(hf, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
+    part_seg = get_image_patch(seg, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
+    assert part_hf.shape == (CONSTANTS["LAYOUT_VOL_SIZE"], CONSTANTS["LAYOUT_VOL_SIZE"]), part_hf.shape
+    assert part_hf.shape == part_seg.shape, part_seg.shape
+    return part_hf, part_seg
 
 
 def get_voxel_intersection_perspective(seg_volume, camera_location):
@@ -428,6 +436,19 @@ def render(
     return bg_img
 
 
+def get_video(frames, output_file):
+    video = cv2.VideoWriter(
+        output_file,
+        cv2.VideoWriter_fourcc(*"avc1"),
+        4,
+        (CONSTANTS["GES_IMAGE_WIDTH"], CONSTANTS["GES_IMAGE_HEIGHT"]),
+    )
+    for f in frames:
+        video.write(f)
+
+    video.release()
+
+
 def main(
     patch_size,
     output_file,
@@ -456,14 +477,14 @@ def main(
         for i in range(len(building_stats))
     }
 
-    # TODO: Replace the center crop here
+    # Simply use image center as the patch center
     cy, cx = seg.shape[0] // 2, seg.shape[1] // 2
-
     # Generate local image patch of the height field and seg map
-    part_hf = get_image_patch(hf, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
-    part_seg = get_image_patch(seg, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
-    assert part_hf.shape == (CONSTANTS["LAYOUT_VOL_SIZE"], CONSTANTS["LAYOUT_VOL_SIZE"])
-    assert part_hf.shape == part_seg.shape
+    part_hf, part_seg = get_part_hf_seg(hf, seg, cx, cy)
+
+    # Build seg_volume
+    logging.info("Generating seg volume ...")
+    seg_volume = scripts.dataset_generator.get_seg_volume(part_seg, part_hf)
 
     # Recalculate the building positions based on the current patch
     _buildings = np.unique(part_seg[part_seg > CONSTANTS["BLD_INS_LABEL_MIN"]])
@@ -474,10 +495,6 @@ def main(
             building_stats[_b, 1] - cy + building_stats[_b, 3] / 2,
             building_stats[_b, 0] - cx + building_stats[_b, 2] / 2,
         ]
-
-    # Build seg_volume
-    logging.info("Generating seg volume ...")
-    seg_volume = scripts.dataset_generator.get_seg_volume(part_seg, part_hf)
 
     part_hf = torch.from_numpy(part_hf[None, None, ...]).to(gancraft_bg.output_device)
     part_seg = torch.from_numpy(part_seg[None, None, ...]).to(gancraft_bg.output_device)
@@ -490,15 +507,10 @@ def main(
 
     # TODO: Generate camera trajectories
     logging.info("Generating camera poses ...")
-    cam_pos = [{"x": 767, "y": y, "z": 395} for y in range(517, 117, -20)]
+    cam_pos = [{"x": 767, "y": y, "z": 354} for y in range(517, 117, -20)]
 
     logging.info("Rendering videos ...")
-    video = cv2.VideoWriter(
-        output_file,
-        cv2.VideoWriter_fourcc(*"mp4v"),
-        4,
-        (CONSTANTS["GES_IMAGE_WIDTH"], CONSTANTS["GES_IMAGE_HEIGHT"]),
-    )
+    frames = []
     for cp in tqdm(cam_pos):
         img = render(
             patch_size,
@@ -512,9 +524,10 @@ def main(
             building_zs,
         )
         img = (utils.helpers.tensor_to_image(img, "RGB") * 255).astype(np.uint8)
-        video.write(img[..., ::-1])
+        frames.append(img[..., ::-1])
+        # cv2.imwrite("output/test.jpg", img[..., ::-1])
 
-    video.release()
+    get_video(frames, output_file)
 
 
 if __name__ == "__main__":

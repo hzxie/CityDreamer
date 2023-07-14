@@ -3,9 +3,13 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 14:08:59
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-12 10:15:27
+ * @Last Modified at: 2023-07-14 20:01:12
  * @Email:  root@haozhexie.com
  */
+
+const CONSTANTS = {
+    "MAX_PATCH_SIZE": 768
+}
 
 String.prototype.format = function() {
     let newStr = this, i = 0
@@ -18,7 +22,6 @@ String.prototype.format = function() {
 function setUpCanvas(canvas, options) {
     canvas.options = options
     canvas.selection = false
-    canvas.hoverCursor = "pointer"
     // Set up canvas size
     resetCanvasSize(canvas)
     $(window).on("resize", function() {
@@ -78,7 +81,7 @@ function setUpCanvas(canvas, options) {
                     "strokeWidth": 4
                 })))
             } else if (canvas.shape == "polyline") {
-                if (canvas._objects[0].points === undefined) {
+                if (canvas._objects[0] && canvas._objects[0].points === undefined) {
                     canvas.remove(...canvas.getObjects())
                 }
                 canvas.add(new fabric.Polyline([
@@ -122,17 +125,29 @@ function setUpCanvas(canvas, options) {
             let element = e.target._element ? e.target._element.className : ""
             if (element === "canvas-img") {
                 fabric.Image.fromURL(e.target.getSrc(), function(img) {
-                    options["bind:destination"].setBackgroundImage(
+                    let targetCanvas = options["bind:destination"],
+                        scaleX = (img.width - CONSTANTS["MAX_PATCH_SIZE"] * 4) / img.width,
+                        scaleY = (img.height - CONSTANTS["MAX_PATCH_SIZE"] * 4) / img.height
+
+                    if (scaleX <= 0 || scaleY <= 0) {
+                        console.log("[ERROR] The image is smaller than 3072x3072.")
+                        return
+                    }
+                    targetCanvas.setBackgroundImage(
                         img,
-                        options["bind:destination"].renderAll.bind(options["bind:destination"]),
+                        targetCanvas.renderAll.bind(targetCanvas),
                         {
                             originX: 'left',
                             originY: 'top',
                             left: 0,
                             top: 0,
-                            scaleX: options["bind:destination"].width / img.width,
-                            scaleY: options["bind:destination"].height / img.height
+                            scaleX: targetCanvas.width / img.width,
+                            scaleY: targetCanvas.height / img.height
                         }
+                    )
+                    targetCanvas.zoomToPoint(
+                        new fabric.Point(targetCanvas.width / 2, targetCanvas.height / 2),
+                        targetCanvas.getZoom() / Math.max(scaleX, scaleY)
                     )
                 })
             }
@@ -264,27 +279,16 @@ function setUpCanvas(canvas, options) {
     }
     if (options["normalization"]) {
         canvas.on("object:added", function(e) {
-            let container = $(e.target.canvas.lowerCanvasEl).parent().parent(),
-                imgDrop = $("input[type=file]", container),
-                element = e.target._element ? e.target._element.className : ""
+            let element = e.target._element ? e.target._element.className : ""
 
-            if (element !== "canvas-img") {
+            if (element !== "canvas-img" || canvas.filename === undefined || canvas.normalized) {
                 return
             }
-            if ($(imgDrop).attr("scale") !== undefined) {
-                return
-            }
-            let formData = new FormData()
-            formData.append("image", imgDrop[0].files[0])
             $.ajax({
-                url: "/img/normalize.action",
-                type: "POST",
-                data: formData,
-                processData: false,
-                contentType: false,
+                url: "/image/%s/normalize.action".format(canvas.filename),
+                type: "GET",
             }).done(function(resp) {
-                $(imgDrop).attr("scale", resp["scale"])
-                fabric.Image.fromURL("/img/get-normalized/" + resp["filename"], function(img) {
+                fabric.Image.fromURL("/image/%s".format(resp["filename"]), function(img) {
                     canvas.setBackgroundImage(
                         img,
                         canvas.renderAll.bind(canvas),
@@ -327,24 +331,45 @@ $(".step").on("click", function() {
 })
 
 // Set up sliders
-$("#camera-altitude").slider({
-    min: 128,
-    max: 778,
+function updateMinElevation() {
+    let altitude = $("#cam-altitude").slider("get value"),
+        elevation = $("#cam-elevation").slider("get value")
+        minElevation = Math.ceil(Math.atan(altitude / CONSTANTS["MAX_PATCH_SIZE"]) * 180 / Math.PI)
+
+    if (elevation < minElevation) {
+        $("#cam-elevation").slider("set value", minElevation)
+    }
+}
+$("#cam-step-size").slider({
+    min: 1,
+    max: 20,
     smooth: true,
     onChange: function() {
         $(".value", this).html($(this).slider("get value"))
     }
 })
-$("#camera-altitude").slider("set value", 353)
-$("#elevation-altitude").slider({
+$("#cam-elevation").slider({
     min: 30,
     max: 60,
     smooth: true,
     onChange: function() {
+        updateMinElevation()
         $(".value", this).html($(this).slider("get value"))
     }
 })
-$("#elevation-altitude").slider("set value", 45)
+$("#cam-altitude").slider({
+    min: 128,
+    max: 778,
+    smooth: true,
+    onChange: function() {
+        updateMinElevation()
+        $(".value", this).html($(this).slider("get value"))
+    }
+})
+// Set default values for sliders
+$("#cam-step-size").slider("set value", 10)
+$("#cam-elevation").slider("set value", 45)
+$("#cam-altitude").slider("set value", 353)
 
 // Set up canvas
 segMapCanvas = new fabric.Canvas("seg-map-canvas")
@@ -371,24 +396,14 @@ setUpCanvas(camTrjCanvas, {
     
 // Set up image uploaders
 $("#seg-map-uploader").imgdrop({
-    "viewer": segMapCanvas
+    "viewer": segMapCanvas,
+    "putUrl": "/image/upload.action",
+    "getUrl": "/image/"
 })
 $("#hf-uploader").imgdrop({
-    "viewer": hfCanvas
-})
-
-// Set up initial shape in canvas
-segMapCanvas.shape = "rect"
-$("#trajectory-mode").on("change", function() {
-    $(".red.button", ".trajectory.section").addClass("hidden")
-    if ($(this).val() == "orbit") {
-        camTrjCanvas.shape = "circle"
-    } else if ($(this).val() == "p2p") {
-        camTrjCanvas.shape = "line"
-    } else if ($(this).val() == "keypoints") {
-        camTrjCanvas.shape = "polyline"
-        $(".red.button", ".trajectory.section").removeClass("hidden")
-    }
+    "viewer": hfCanvas,
+    "putUrl": "/image/upload.action",
+    "getUrl": "/image/"
 })
 
 // Set up dropdowns
@@ -409,13 +424,154 @@ $("#layout-data-src").on("change", function() {
     }
 })
 
+// Set up initial shape in canvas
+segMapCanvas.shape = "rect"
+$("#trajectory-mode").on("change", function() {
+    $(".red.button", ".trajectory.section").addClass("hidden")
+    if ($(this).val() == "orbit") {
+        camTrjCanvas.shape = "circle"
+    } else if ($(this).val() == "p2p") {
+        camTrjCanvas.shape = "line"
+    } else if ($(this).val() == "keypoints") {
+        camTrjCanvas.shape = "polyline"
+        $(".red.button", ".trajectory.section").removeClass("hidden")
+    }
+})
+
 // Set up events on button clicks
+function getTrajectory() {
+    let trajectory = [],
+        altitude = $("#cam-altitude").slider("get value"),
+        elevation = $("#cam-elevation").slider("get value"),
+        camStepSize = $("#cam-step-size").slider("get value"),
+        uniqueObject = camTrjCanvas._objects[0],
+        scale = camTrjCanvas.backgroundImage ? camTrjCanvas.backgroundImage.scaleX : 1
+    
+    if (uniqueObject && uniqueObject.type === "circle") {
+        trajectory = getOrbitTrajectory(uniqueObject, altitude, elevation, camStepSize, scale)
+    } else if (uniqueObject && uniqueObject.type === "line") {
+        trajectory = getP2PTrajectory(uniqueObject, altitude, elevation, camStepSize, scale)
+    } else if (uniqueObject && uniqueObject.type === "polyline") {
+        trajectory = getKeypointsTrajectory(uniqueObject, altitude, elevation, camStepSize, scale)
+    }
+    for (let i = 0; i < trajectory.length; ++ i) {
+        trajectory[i]["camera"]["x"] /= scale
+        trajectory[i]["camera"]["y"] /= scale
+        trajectory[i]["target"]["x"] /= scale
+        trajectory[i]["target"]["y"] /= scale
+    }
+    console.log(camTrjCanvas.backgroundImage, trajectory)
+    return trajectory
+}
+
+function getOrbitTrajectory(object, altitude, elevation, stepSize, scale) {
+    let cx = object.left + object.radius,
+        cy = object.top + object.radius,
+        perimeter = 2 * Math.PI * object.radius,
+        targetDist = altitude / Math.tan(elevation / 180 * Math.PI) * scale,
+        nPoints = Math.round(perimeter / stepSize / 4) * 4,
+        trajectory = []
+
+    for (let i = 0; i < nPoints; ++ i) {
+        let theta = 2 * Math.PI / nPoints * i,
+            camX = cx + object.radius * Math.cos(theta),
+            camY = cy + object.radius * Math.sin(theta),
+            targetX = targetDist > object.radius ?
+                      cx :
+                      cx + (object.radius - targetDist) * Math.cos(theta),
+            targetY = targetDist > object.radius ?
+                      cy :
+                      cy + (object.radius - targetDist) * Math.sin(theta)
+
+        trajectory.push({
+            "camera": {"x": camX, "y": camY, "z": altitude},
+            "target": {"x": targetX, "y": targetY, "z": 0}
+        })
+    }
+    return trajectory
+}
+
+function getP2PTrajectory(object, altitude, elevation, stepSize, scale) {
+    let deltaX = object.x1 - object.x2,
+        deltaY = object.y1 - object.y2,
+        dist = Math.sqrt(deltaX * deltaX + deltaY * deltaY),
+        targetDist = altitude / Math.tan(elevation / 180 * Math.PI) * scale,
+        nPoints = Math.round(dist / stepSize),
+        theta = deltaX == 0 ? Math.PI / 2 : Math.atan(deltaY / deltaX),
+        signX = object.x1 < object.x2 ? 1 : -1,
+        signY = object.y1 < object.y2 ? -1 : 1,
+        trajectory = []
+
+    theta = theta < Math.PI / 2 ? theta : Math.PI - theta
+    for (let i = 0; i <= nPoints; ++ i) {
+        let camX = object.x1 + signX * dist / nPoints * i * Math.cos(theta),
+            camY = object.y1 + signY * dist / nPoints * i * Math.sin(theta),
+            targetX = camX + signX * targetDist * Math.cos(theta),
+            targetY = camY + signY * targetDist * Math.sin(theta)
+
+        trajectory.push({
+            "camera": {"x": camX, "y": camY, "z": altitude},
+            "target": {"x": targetX, "y": targetY, "z": 0}
+        })
+    }
+    return trajectory
+}
+
+function getKeypointsTrajectory(object, altitude, elevation, stepSize, scale) {
+    console.log(object, stepSize)
+    return []
+}
+
+$(".primary.button", ".trajectory.section").on("click", function(e) {
+    $(".primary.button", ".trajectory.section").html("Please wait ...")
+    $(".primary.button", ".trajectory.section").attr("disabled", "disabled")
+    $(".message", ".trajectory.section").addClass("hidden")
+    e.preventDefault()
+
+    let errorMessage = "",
+        trajectory = getTrajectory(),
+        segFileName = segMapCanvas.filename,
+        hfFileName = hfCanvas.filename
+    if (segFileName === undefined || hfFileName === undefined) {
+        errorMessage = "Please generate Segmentation Map and Height Field first."
+    } else if (trajectory.length == 0) {
+        errorMessage = "Please draw the camera trajectory on Camera Trajectory Configurator."
+    }
+    if (errorMessage) {
+        $(".message", ".trajectory.section").html(errorMessage)
+        $(".message", ".trajectory.section").removeClass("hidden")
+        $(".primary.button", ".trajectory.section").html("Preview Trajectory")
+        $(".primary.button", ".trajectory.section").removeAttr("disabled")
+        return
+    }
+    $.ajax({
+        "url": "/trajectory/preview.action",
+        "type": "POST",
+        "data": {
+            "hf": hfFileName,
+            "seg": segFileName,
+            "trajectory": JSON.stringify(trajectory)
+        },
+        "dataType": "json"
+    }).done(function(resp) {
+        if (resp["filename"]) {
+            $("video", ".modal").attr("src", "/video/%s".format(resp["filename"]))
+            $(".ui.basic.modal").modal("show")
+        } else {
+            errorMessage = "Error occurred while rendering the video."
+            $(".message", ".trajectory.section").html(errorMessage)
+            $(".message", ".trajectory.section").removeClass("hidden")
+        }
+        $(".primary.button", ".trajectory.section").html("Preview Trajectory")
+        $(".primary.button", ".trajectory.section").removeAttr("disabled")
+    })
+})
+
 $(".red.button", ".trajectory.section").on("click", function(e) {
     e.preventDefault()
     if (camTrjCanvas.shape !== "polyline")  {
         return
     }
-
     let uniqueObject = camTrjCanvas._objects[0]
     if (uniqueObject) {
         if (uniqueObject.points.length <= 2) {

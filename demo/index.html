@@ -12,7 +12,7 @@
 <body>
     <div id="header">
         <div class="ui container">
-            <h1>CityDreamer: Generating New York in an Hour</h1>
+            <h1>CityDreamer: Compositional Generative Model of Unbounded 3D Cities</h1>
             <p>The official demo to generate your own city in New York style.</p>
             <div class="ui horizontal list">
                 <div class="item">
@@ -82,7 +82,6 @@
                                 <div class="five wide field">
                                     <label>Layout Size</label>
                                     <select id="layout-size" class="ui dropdown">
-                                        <option value="2048">2048x2048</option>
                                         <option value="4096">4096x4096</option>
                                         <option value="8192">8192x8192</option>
                                         <option value="16384">16384x16384</option>
@@ -101,7 +100,7 @@
                             <label>Segmentation Map</label>
                             <canvas id="seg-map-canvas"></canvas>
                             <div id="seg-map-uploader" class="imgdrop hidden">
-                                Drag Seg. Map here
+                                Drag seg. map here
                             </div> <!-- #seg-map-uploader -->
                             <p>Press and hold the Ctrl/Command key to enter the edit mode.</p>
                         </div> <!-- .eleven.wide.column -->
@@ -109,15 +108,16 @@
                             <label>Height Field</label>
                             <canvas id="hf-canvas"></canvas>
                             <div id="hf-uploader" class="imgdrop hidden">
-                                Drag Seg. Map here
+                                Drag height map here
                             </div> <!-- #hf-uploader -->
                         </div> <!-- .five.wide.column -->
                     </div> <!-- .equal.width.grid -->
                 </div> <!-- #layout-section -->
                 <div class="trajectory section">
+                    <div class="ui negative hidden message"></div> <!-- .message -->
                     <div class="ui grid">
                         <div class="eleven wide column">
-                            <label>Keyframe Selector</label>
+                            <label>Camera Trajectory Configurator</label>
                             <canvas id="cam-trj-canvas"></canvas>
                             <p>Press and hold the Ctrl/Command key to enter the edit mode.</p>
                         </div> <!-- .eleven.wide.column -->
@@ -133,16 +133,22 @@
                                     </select>
                                 </div> <!-- .field -->
                                 <div class="field">
-                                    <label>Camera Altitude</label>
-                                    <div id="camera-altitude" class="ui slider">
+                                    <label>Camera Step Size</label>
+                                    <div id="cam-step-size" class="ui slider">
                                         <p><span class="value"></span> m</p>
-                                    </div> <!-- #camera-altitude -->
+                                    </div> <!-- #cam-step-size -->
+                                </div> <!-- .field -->
+                                <div class="field">
+                                    <label>Camera Altitude</label>
+                                    <div id="cam-altitude" class="ui slider">
+                                        <p><span class="value"></span> m</p>
+                                    </div> <!-- #cam-altitude -->
                                 </div> <!-- .field -->
                                 <div class="field">
                                     <label>Elevation Angle</label>
-                                    <div id="elevation-altitude" class="ui slider">
+                                    <div id="cam-elevation" class="ui slider">
                                         <p><span class="value"></span> &deg;</p>
-                                    </div> <!-- #elevation-altitude -->
+                                    </div> <!-- #cam-elevation -->
                                 </div> <!-- .field -->
                                 <button class="ui fluid primary button">Preview Trajectory</button>
                                 <button class="ui fluid red button hidden">Remove Last Keypoint</button>
@@ -156,6 +162,14 @@
             </div> <!-- .twelve.wide.column -->
         </div> <!-- .grid -->
     </div> <!-- .container -->
+    <div class="ui basic modal">
+        <div class="content">
+            <video controls>
+                <source src="" type="video/mp4">
+                <p>The video is not supported by your browser.</p>
+            </video>
+        </div> <!-- .content -->
+    </div> <!-- .modal -->
     <script type="text/javascript" src="static/js/semantic.min.js"></script>
     <script type="text/javascript" src="static/js/fabric-5.3.0.min.js"></script>
     <script type="text/javascript" src="static/js/jquery.image-drop.js"></script>
