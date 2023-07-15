@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-15 19:15:13
+# @Last Modified at: 2023-07-15 21:14:17
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -73,10 +73,10 @@ def get_models(sampler_ckpt, gancraft_bg_ckpt, gancraft_fg_ckpt):
         gancraft_bg = torch.nn.DataParallel(gancraft_bg).cuda()
         gancraft_fg = torch.nn.DataParallel(gancraft_fg).cuda()
     else:
-        vqae.device = torch.device("cpu")
-        sampler.device = torch.device("cpu")
-        gancraft_bg.device = torch.device("cpu")
-        gancraft_fg.device = torch.device("cpu")
+        vqae.output_device = torch.device("cpu")
+        sampler.output_device = torch.device("cpu")
+        gancraft_bg.output_device = torch.device("cpu")
+        gancraft_fg.output_device = torch.device("cpu")
 
     # Recover from checkpoints
     logging.info("Recovering from checkpoints ...")
@@ -88,30 +88,30 @@ def get_models(sampler_ckpt, gancraft_bg_ckpt, gancraft_fg_ckpt):
     return vqae, sampler, gancraft_bg, gancraft_fg
 
 
-def get_layout_codebook_indexes(sampler, vqae, indexes=None, temperature=1):
+def _get_layout_codebook_indexes(sampler, indexes=None):
     with torch.no_grad():
         min_encoding_indices = sampler.module.sample(
             1,
             sampler.module.cfg.NETWORK.SAMPLER.TOTAL_STEPS,
             x_t=indexes,
-            temperature=temperature,
-            device=sampler.device,
+            device=sampler.output_device,
         )
         # print(min_encoding_indices.size())  # torch.Size([bs, att_size**2])
-        min_encoding_indices = min_encoding_indices.unsqueeze(dim=2)
+        return min_encoding_indices.unsqueeze(dim=2)
+
+
+def _get_layout(vqae, sampler, min_encoding_indices):
+    with torch.no_grad():
         one_hot = torch.zeros(
             (
                 1,
                 sampler.module.cfg.NETWORK.SAMPLER.BLOCK_SIZE,
                 vqae.module.cfg.NETWORK.VQGAN.N_EMBED,
             ),
-            device=sampler.device,
+            device=sampler.output_device,
         )
-        return one_hot.scatter_(2, min_encoding_indices, 1)
+        one_hot = one_hot.scatter_(2, min_encoding_indices, 1)
 
-
-def get_layout(vqae, one_hot):
-    with torch.no_grad():
         codebook = vqae.module.quantize.get_codebook()
         quant = (
             torch.matmul(
@@ -128,15 +128,86 @@ def get_layout(vqae, one_hot):
             .contiguous()
         )
         # print(quant.size())   # torch.Size([bs, embed_dim, att_size, att_size])
-        pred = vqae.module.decode(quant)
+        return vqae.module.decode(quant)
 
 
-def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None):
-    if city_osm_dir is not None:
-        hf = np.array(Image.open(os.path.join(city_osm_dir, "hf.png")))
-        seg = np.array(Image.open(os.path.join(city_osm_dir, "seg.png")).convert("P"))
+def generate_city_layout(
+    sampler=None,
+    vqae=None,
+    hf=None,
+    seg=None,
+    mask=None,
+    layout_size=CONSTANTS["EXTENDED_VOL_SIZE"],
+):
+    # OUTPUT_SIZE == 32
+    # FEATURE_SIZE == 512
+    # SCALE == 16
+    OUTPUT_SIZE = vqae.module.cfg.NETWORK.VQGAN.RESOLUTION
+    FEATURE_SIZE = vqae.module.cfg.NETWORK.VQGAN.ATTN_RESOLUTION
+    SCALE = OUTPUT_SIZE // FEATURE_SIZE
+    STRIDE = FEATURE_SIZE // 2
+    assert STRIDE == 16
+
+    if hf is None or seg is None:
+        lyt_code_size = layout_size // SCALE
+        lyt_code_idx = (
+            torch.ones(
+                (1, lyt_code_size, lyt_code_size),
+                device=sampler.output_device,
+            ).long()
+            * sampler.module.cfg.NETWORK.VQGAN.N_EMBED
+        )
     else:
-        size = (CONSTANTS["LAYOUT_VOL_SIZE"],) * 2 if hf_seg is None else hf_seg.shape
+        raise NotImplementedError
+
+    if mask is not None:
+        raise NotImplementedError
+
+    # Outpainting with 50% overlap (determined by STRIDE)
+    layout = torch.zeros(1, 7, layout_size, layout_size)
+    for i in range(lyt_code_size // STRIDE - 1):
+        for j in range(lyt_code_size // STRIDE - 1):
+            rs = i * STRIDE
+            cs = j * STRIDE
+            part_lyt_code_idx = lyt_code_idx[
+                :, rs : rs + FEATURE_SIZE, cs : cs + FEATURE_SIZE
+            ]
+            # Use sample to predict code indexes
+            lyt_code_idx[
+                :, rs : rs + FEATURE_SIZE, cs : cs + FEATURE_SIZE
+            ] = _get_layout_codebook_indexes(
+                sampler, indexes=part_lyt_code_idx.reshape(1, -1)
+            ).reshape(
+                1, FEATURE_SIZE, FEATURE_SIZE
+            )
+            # Use VQVAE to generate layouts
+            rs *= SCALE
+            cs *= SCALE
+            layout[..., rs : rs + OUTPUT_SIZE, cs : cs + OUTPUT_SIZE] = _get_layout(
+                vqae,
+                sampler,
+                lyt_code_idx[:, rs : rs + FEATURE_SIZE, cs : cs + FEATURE_SIZE],
+            )
+
+    hf = layout[0, 0] * CONSTANTS["LAYOUT_MAX_HEIGHT"]
+    seg = utils.helpers.onehot_to_mask(
+        layout[[0], 1:],
+        vqae.module.cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
+    ).squeeze(dim=0)
+    return hf.cpu().numpy().astype(np.int32), seg.cpu().numpy().astype(np.int32)
+
+
+def get_osm_city_layout(city_osm_dir):
+    hf = np.array(Image.open(os.path.join(city_osm_dir, "hf.png")))
+    seg = np.array(Image.open(os.path.join(city_osm_dir, "seg.png")).convert("P"))
+    return hf, seg
+
+
+def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None, size=None):
+    if city_osm_dir is None:
+        hf, seg = generate_city_layout(sampler, vqae, hf_seg, size)
+    else:
+        hf, seg = get_osm_city_layout(city_osm_dir)
 
     ins_seg, building_stats = get_instance_seg_map(seg)
     hf[hf >= CONSTANTS["LAYOUT_MAX_HEIGHT"]] = CONSTANTS["LAYOUT_MAX_HEIGHT"] - 1
@@ -554,8 +625,8 @@ def main(
     )
     # Generate height fields and seg maps
     logging.info("Generating city layouts ...")
-    # hf, seg, building_stats = get_city_layout(None, sampler, vqae)
-    hf, seg, building_stats = get_city_layout(city_osm_dir)
+    hf, seg, building_stats = get_city_layout(None, sampler, vqae)
+    # hf, seg, building_stats = get_city_layout(city_osm_dir)
     assert hf.shape == seg.shape
     logging.info("City Layout Patch Size (HxW): %s" % (hf.shape,))
 

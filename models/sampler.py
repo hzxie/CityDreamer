@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 13:42:48
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-12 20:57:11
+# @Last Modified at: 2023-07-15 20:14:37
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/samb-t/unleashing-transformers
 
@@ -62,10 +62,8 @@ class AbsorbingDiffusionSampler(torch.nn.Module):
                 ).long()
                 * self.cfg.NETWORK.VQGAN.N_EMBED
             )
-            unmasked = torch.zeros_like(x_t, device=device).bool()
-        else:
-            unmasked = x_t == -1
-
+        # Initialize: unmasked = torch.zeros_like(x_t, device=device).bool()
+        unmasked = x_t != self.cfg.NETWORK.VQGAN.N_EMBED
         for t in reversed(sample_steps):
             t = torch.full((n_samples,), t, device=device, dtype=torch.long)
             # where to unmask
