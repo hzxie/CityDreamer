@@ -1,6 +1,7 @@
 easydict
 einops
 flask
+flask-executor
 lxml
 matplotlib
 mayavi

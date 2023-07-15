@@ -4,21 +4,23 @@
 # @Author: Haozhe Xie
 # @Date:   2023-06-30 10:12:55
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-14 16:27:28
+# @Last Modified at: 2023-07-15 07:37:08
 # @Email:  root@haozhexie.com
 
 import argparse
+import cv2
 import flask
+import flask_executor
 import json
 import numpy as np
 import io
 import logging
 import os
 import sys
-import torch
 import uuid
 
 from PIL import Image
+from tqdm import tqdm
 
 DEMO_HOME_DIR = os.path.abspath(os.path.dirname(__file__))
 # Add parent dir to PYTHONPATH
@@ -28,7 +30,10 @@ import scripts.inference as inference
 import scripts.dataset_generator as inference_helper
 import utils.helpers
 
-CONSTANTS = {"UPLOAD_DIR": "/tmp"}
+CONSTANTS = {
+    "GES_IMAGE_HEIGHT": 540,
+    "GES_IMAGE_WIDTH": 960,
+}
 MODELS = {
     "vqae": None,
     "sampler": None,
@@ -38,6 +43,7 @@ MODELS = {
 
 # The Flask application
 app = flask.Flask(__name__)
+executor = flask_executor.Executor(app)
 
 
 @app.route("/", methods=["GET"])
@@ -58,10 +64,22 @@ def upload_image():
 @app.route("/image/<file_name>", methods=["GET"])
 def get_image(file_name):
     file_path = os.path.join(CONSTANTS["UPLOAD_DIR"], file_name)
+    print(file_path, os.path.exists(file_path))
     if not os.path.exists(file_path):
         flask.abort(404)
 
     return flask.send_file(file_path, mimetype="image/png")
+
+
+@app.route("/image/<video_name>/<frame_id>", methods=["GET"])
+def get_vide_frame(video_name, frame_id):
+    frame_id = int(frame_id) if frame_id.isdigit() else 0
+    file_path = os.path.join(CONSTANTS["UPLOAD_DIR"], video_name, "%04d.jpg" % frame_id)
+    print(file_path, os.path.exists(file_path))
+    if not os.path.exists(file_path):
+        flask.abort(404)
+
+    return flask.send_file(file_path, mimetype="image/jpg")
 
 
 @app.route("/image/<file_name>/normalize.action", methods=["GET"])
@@ -81,7 +99,6 @@ def normalize_image(file_name):
 @app.route("/video/<file_name>", methods=["GET"])
 def get_video(file_name):
     file_path = os.path.join(CONSTANTS["UPLOAD_DIR"], file_name)
-    print(file_path, os.path.exists(file_path))
     if not os.path.exists(file_path):
         flask.abort(404)
 
@@ -104,42 +121,117 @@ def get_trajectory_preview():
         logging.exception(ex)
         flask.abort(400)
 
-    hf = np.array(Image.open(hf_filepath)).astype(np.int32)
-    seg = np.array(Image.open(seg_filepath).convert("P")).astype(np.int32)
     output_file = os.path.join(CONSTANTS["UPLOAD_DIR"], "%s.mp4" % uuid.uuid4())
-    frames = []
-    for t in trajectory:
-        frames.append(_get_seg_volume_rendering(hf, seg, t))
-
+    frames = get_seg_volume_rendering(hf_filepath, seg_filepath, trajectory)
     inference.get_video(frames, output_file)
     return flask.jsonify({"filename": os.path.basename(output_file)})
 
 
-def _get_seg_volume_rendering(hf, seg, pos):
-    tx, ty = int(pos["target"]["x"]), int(pos["target"]["y"])
-    part_hf, part_seg = inference.get_part_hf_seg(hf, seg, tx, ty)
-    seg_volume = inference_helper.get_seg_volume(part_seg, part_hf)
-    (
-        voxel_id,
-        depth2,
-        raydirs,
-        cam_origin,
-    ) = inference.get_voxel_intersection_perspective(
-        seg_volume,
-        {
-            "x": pos["camera"]["x"] - tx + inference.CONSTANTS["LAYOUT_VOL_SIZE"] // 2,
-            "y": pos["camera"]["y"] - ty + inference.CONSTANTS["LAYOUT_VOL_SIZE"] // 2,
-            "z": pos["camera"]["z"],
-        },
+@app.route("/city/render.action", methods=["POST"])
+def render():
+    hf_filename = flask.request.form.get("hf")
+    hf_filepath = os.path.join(CONSTANTS["UPLOAD_DIR"], hf_filename)
+    seg_filename = flask.request.form.get("seg")
+    seg_filepath = os.path.join(CONSTANTS["UPLOAD_DIR"], seg_filename)
+    trajectory = flask.request.form.get("trajectory")
+
+    if not os.path.exists(hf_filepath) or not os.path.exists(seg_filepath):
+        flask.abort(404)
+    try:
+        trajectory = json.loads(trajectory)
+    except Exception as ex:
+        logging.exception(ex)
+        flask.abort(400)
+
+    video_name = "%s" % uuid.uuid4()
+    output_dir = os.path.join(CONSTANTS["UPLOAD_DIR"], video_name)
+    os.makedirs(output_dir, exist_ok=True)
+    executor.submit(
+        get_city_rendering, hf_filepath, seg_filepath, trajectory, output_dir
     )
-    seg_map = utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy())
-    frame = inference_helper._get_diffuse_shading_img(
-        seg_map,
-        depth2.squeeze(dim=0).permute(2, 0, 1, 3, 4),
-        raydirs.squeeze(dim=0),
-        cam_origin.squeeze(dim=0),
+    return flask.jsonify({"video": video_name, "frames": len(trajectory)})
+
+
+def get_seg_volume_rendering(hf, seg, trajectory):
+    # Invoked by get_trajectory_preview()
+    hf = np.array(Image.open(hf)).astype(np.int32)
+    seg = np.array(Image.open(seg).convert("P")).astype(np.int32)
+    frames = []
+    for t in tqdm(trajectory, desc="Rendering seg volume"):
+        tx, ty = int(t["target"]["x"]), int(t["target"]["y"])
+        part_hf, part_seg = inference.get_part_hf_seg(hf, seg, tx, ty)
+        seg_volume = inference_helper.get_seg_volume(part_seg, part_hf)
+        (
+            voxel_id,
+            depth2,
+            raydirs,
+            cam_origin,
+        ) = inference.get_voxel_intersection_perspective(
+            seg_volume,
+            {
+                "x": t["camera"]["x"]
+                - tx
+                + inference.CONSTANTS["LAYOUT_VOL_SIZE"] // 2,
+                "y": t["camera"]["y"]
+                - ty
+                + inference.CONSTANTS["LAYOUT_VOL_SIZE"] // 2,
+                "z": t["camera"]["z"],
+            },
+        )
+        seg_map = utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy())
+        frame = inference_helper._get_diffuse_shading_img(
+            seg_map,
+            depth2.squeeze(dim=0).permute(2, 0, 1, 3, 4),
+            raydirs.squeeze(dim=0),
+            cam_origin.squeeze(dim=0),
+        )
+        frames.append(np.array(frame)[..., ::-1])
+
+    return frames
+
+
+def get_city_rendering(hf, seg, trajectory, output_dir):
+    hf = np.array(Image.open(hf)).astype(np.int32)
+    seg = np.array(Image.open(seg).convert("P"))
+    seg, building_stats = inference.get_instance_seg_map(seg)
+    seg = seg.astype(np.int32)
+
+    bg_z, building_zs = inference.get_latent_codes(
+        building_stats,
+        MODELS["gancraft_bg"].module.cfg.NETWORK.GANCRAFT.STYLE_DIM,
+        MODELS["gancraft_bg"].output_device,
     )
-    return np.array(frame)[..., ::-1]
+    for f_idx, t in enumerate(tqdm(trajectory, desc="Rendering city")):
+        tx, ty = int(t["target"]["x"]), int(t["target"]["y"])
+        part_hf, part_seg = inference.get_part_hf_seg(hf, seg, tx, ty)
+        _building_stats = inference.get_part_building_stats(
+            part_seg, building_stats, tx, ty
+        )
+        seg_volume = inference_helper.get_seg_volume(part_seg, part_hf)
+        hf_seg = inference.get_hf_seg_tensor(
+            part_hf, part_seg, MODELS["gancraft_bg"].output_device
+        )
+        img = inference.render(
+            (CONSTANTS["PATCH_HEIGHT"], CONSTANTS["PATCH_WIDTH"]),
+            seg_volume,
+            hf_seg,
+            {
+                "x": t["camera"]["x"]
+                - tx
+                + inference.CONSTANTS["LAYOUT_VOL_SIZE"] // 2,
+                "y": t["camera"]["y"]
+                - ty
+                + inference.CONSTANTS["LAYOUT_VOL_SIZE"] // 2,
+                "z": t["camera"]["z"],
+            },
+            MODELS["gancraft_bg"],
+            MODELS["gancraft_fg"],
+            _building_stats,
+            bg_z,
+            building_zs,
+        )
+        img = (utils.helpers.tensor_to_image(img, "RGB") * 255).astype(np.uint8)
+        cv2.imwrite(os.path.join(output_dir, "%04d.jpg" % f_idx), img[..., ::-1])
 
 
 def get_runtime_arguments():
@@ -156,6 +248,20 @@ def get_runtime_arguments():
         "--gancraft_fg_ckpt",
         default=os.path.join(inference.PROJECT_HOME, "output", "gancraft-fg.pth"),
     )
+    parser.add_argument(
+        "--upload_dir",
+        default="/tmp/city-dreamer",
+    )
+    parser.add_argument(
+        "--patch_height",
+        default=CONSTANTS["GES_IMAGE_HEIGHT"] // 5,
+        type=int,
+    )
+    parser.add_argument(
+        "--patch_width",
+        default=CONSTANTS["GES_IMAGE_WIDTH"] // 5,
+        type=int,
+    )
     return parser.parse_args()
 
 
@@ -165,16 +271,24 @@ if __name__ == "__main__":
         level=logging.INFO,
     )
     args = get_runtime_arguments()
-    # logging.info("Initialize models ...")
-    # (
-    #     MODELS["vqae"],
-    #     MODELS["sampler"],
-    #     MODELS["gancraft_bg"],
-    #     MODELS["gancraft_fg"],
-    # ) = inference.get_models(
-    #     args.sampler_ckpt, args.gancraft_bg_ckpt, args.gancraft_fg_ckpt
-    # )
+
+    # Register runtime arguments to global variables
+    os.makedirs(args.upload_dir, exist_ok=True)
+    CONSTANTS["UPLOAD_DIR"] = args.upload_dir
+    CONSTANTS["PATCH_HEIGHT"] = args.patch_height
+    CONSTANTS["PATCH_WIDTH"] = args.patch_width
+
+    # Initialize models
+    logging.info("Initialize models ...")
+    (
+        MODELS["vqae"],
+        MODELS["sampler"],
+        MODELS["gancraft_bg"],
+        MODELS["gancraft_fg"],
+    ) = inference.get_models(
+        args.sampler_ckpt, args.gancraft_bg_ckpt, args.gancraft_fg_ckpt
+    )
 
     # Start HTTP server
     logging.info("Launching demo ...")
-    app.run(host="0.0.0.0", port=8080, debug=True)
+    app.run(host="0.0.0.0", port=3186, debug=True)

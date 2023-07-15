@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 14:08:59
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-14 20:01:12
+ * @Last Modified at: 2023-07-15 08:10:13
  * @Email:  root@haozhexie.com
  */
 
@@ -284,9 +284,8 @@ function setUpCanvas(canvas, options) {
             if (element !== "canvas-img" || canvas.filename === undefined || canvas.normalized) {
                 return
             }
-            $.ajax({
+            $.get({
                 url: "/image/%s/normalize.action".format(canvas.filename),
-                type: "GET",
             }).done(function(resp) {
                 fabric.Image.fromURL("/image/%s".format(resp["filename"]), function(img) {
                     canvas.setBackgroundImage(
@@ -544,9 +543,8 @@ $(".primary.button", ".trajectory.section").on("click", function(e) {
         $(".primary.button", ".trajectory.section").removeAttr("disabled")
         return
     }
-    $.ajax({
+    $.post({
         "url": "/trajectory/preview.action",
-        "type": "POST",
         "data": {
             "hf": hfFileName,
             "seg": segFileName,
@@ -588,5 +586,84 @@ $(".red.button", ".trajectory.section").on("click", function(e) {
             uniqueObject.points.pop()
         }
         camTrjCanvas.renderAll()
+    }
+})
+
+function waitForVideoRendering(videoName, nFrames) {
+    let currentFrame = 0,
+        imgRefreshInterval = setInterval(function() {
+            $.get({
+                url: "/image/%s/%s".format(videoName, currentFrame),
+                xhrFields: {responseType: "blob"},
+                success: function (imageBlob) {
+                    let imgUrl = URL.createObjectURL(imageBlob)
+                    $("img", ".image-viewer").addClass("hidden")
+                    $(".image-viewer").append("<img src='%s'>".format(imgUrl))
+                    if (++ currentFrame >= nFrames) {
+                        clearInterval(imgRefreshInterval)
+                        $(".primary.button", ".render.section").html("Render Video")
+                        $(".primary.button", ".render.section").removeAttr("disabled")
+                        $(".green.button", ".render.section").removeAttr("disabled")
+                    }
+                    $(".progress", ".render.section").progress({percent: currentFrame / nFrames * 100})
+                }
+            })
+        }, 5000)
+}
+
+$(".primary.button", ".render.section").on("click", function(e) {
+    $(".primary.button", ".render.section").html("Please wait ...")
+    $(".primary.button", ".render.section").attr("disabled", "disabled")
+    $(".green.button", ".render.section").attr("disabled", "disabled")
+    $(".message", ".render.section").addClass("hidden")
+    e.preventDefault()
+
+    let errorMessage = "",
+        trajectory = getTrajectory(),
+        segFileName = segMapCanvas.filename,
+        hfFileName = hfCanvas.filename
+    if (segFileName === undefined || hfFileName === undefined) {
+        errorMessage = "Please generate Segmentation Map and Height Field first."
+    } else if (trajectory.length == 0) {
+        errorMessage = "Please draw the camera trajectory on Camera Trajectory Configurator."
+    }
+    if (errorMessage) {
+        $(".message", ".render.section").html(errorMessage)
+        $(".message", ".render.section").removeClass("hidden")
+        $(".primary.button", ".render.section").html("Render")
+        $(".primary.button", ".render.section").removeAttr("disabled")
+        return
+    }
+    $.post({
+        "url": "/city/render.action",
+        "data": {
+            "hf": hfFileName,
+            "seg": segFileName,
+            "trajectory": JSON.stringify(trajectory)
+        },
+        "dataType": "json"
+    }).done(function(resp) {
+        waitForVideoRendering(resp["video"], resp["frames"])
+    })
+})
+
+// Global variables for play/pause videos
+playFrameIdx = 0
+$(".green.button", ".render.section").on("click", function(e) {
+    let images = $("img", ".image-viewer"),
+        currentText = $(".green.button", ".render.section").html()
+    if (currentText == "Play Video") {
+        $(".green.button", ".render.section").html("Pause")
+        playInterval = setInterval(function() {
+            if (playFrameIdx >= images.length) {
+                playFrameIdx = 0
+            }
+            $("img", ".image-viewer").addClass("hidden")
+            $(images[playFrameIdx ++]).removeClass("hidden")
+            $(".progress", ".render.section").progress({percent: playFrameIdx / images.length * 100})
+        }, 1000)
+    } else if (currentText == "Pause") {
+        $(".green.button", ".render.section").html("Play Video")
+        clearInterval(playInterval)
     }
 })

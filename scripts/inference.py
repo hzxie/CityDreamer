@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-14 20:05:16
+# @Last Modified at: 2023-07-15 06:37:52
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -136,11 +136,31 @@ def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None):
     else:
         size = (CONSTANTS["LAYOUT_VOL_SIZE"],) * 2 if hf_seg is None else hf_seg.shape
 
+    ins_seg, building_stats = get_instance_seg_map(seg)
+    return hf.astype(np.int32), ins_seg.astype(np.int32), building_stats
+
+
+def get_instance_seg_map(seg):
     # Mapping constructions to buildings
     seg[seg == 4] = 2
     # Generate building instance seg maps
     seg, building_stats = scripts.dataset_generator.get_instance_seg_map(seg)
-    return hf.astype(np.int32), seg.astype(np.int32), building_stats
+    return seg.astype(np.int32), building_stats
+
+
+def get_latent_codes(building_stats, bg_style_dim, output_device):
+    bg_z = _get_z(output_device, bg_style_dim)
+    building_zs = {
+        (i + CONSTANTS["BLD_INS_LABEL_MIN"]) * 2: _get_z(output_device)
+        for i in range(len(building_stats))
+    }
+    return bg_z, building_zs
+
+
+def _get_z(device, z_dim=256):
+    if z_dim is None:
+        return None
+    return torch.randn(1, z_dim, dtype=torch.float32, device=device)
 
 
 def get_image_patch(image, cx, cy, patch_size):
@@ -154,9 +174,34 @@ def get_image_patch(image, cx, cy, patch_size):
 def get_part_hf_seg(hf, seg, cx, cy):
     part_hf = get_image_patch(hf, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
     part_seg = get_image_patch(seg, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
-    assert part_hf.shape == (CONSTANTS["LAYOUT_VOL_SIZE"], CONSTANTS["LAYOUT_VOL_SIZE"]), part_hf.shape
+    assert part_hf.shape == (
+        CONSTANTS["LAYOUT_VOL_SIZE"],
+        CONSTANTS["LAYOUT_VOL_SIZE"],
+    ), part_hf.shape
     assert part_hf.shape == part_seg.shape, part_seg.shape
     return part_hf, part_seg
+
+
+def get_part_building_stats(part_seg, building_stats, cx, cy):
+    _buildings = np.unique(part_seg[part_seg > CONSTANTS["BLD_INS_LABEL_MIN"]])
+    _building_stats = {}
+    for b in _buildings:
+        _b = b // 2 - CONSTANTS["BLD_INS_LABEL_MIN"]
+        _building_stats[b] = [
+            building_stats[_b, 1] - cy + building_stats[_b, 3] / 2,
+            building_stats[_b, 0] - cx + building_stats[_b, 2] / 2,
+        ]
+    return _building_stats
+
+
+def get_hf_seg_tensor(part_hf, part_seg, output_device):
+    part_hf = torch.from_numpy(part_hf[None, None, ...]).to(output_device)
+    part_seg = torch.from_numpy(part_seg[None, None, ...]).to(output_device)
+    part_hf = part_hf / CONSTANTS["LAYOUT_MAX_HEIGHT"]
+    part_seg = utils.helpers.masks_to_onehots(
+        part_seg[:, 0, :, :], CONSTANTS["LAYOUT_N_CLASSES"]
+    )
+    return torch.cat([part_hf, part_seg], dim=1)
 
 
 def get_voxel_intersection_perspective(seg_volume, camera_location):
@@ -205,12 +250,6 @@ def get_voxel_intersection_perspective(seg_volume, camera_location):
         raydirs.unsqueeze(dim=0),
         cam_origin.unsqueeze(dim=0),
     )
-
-
-def get_z(device, z_dim=256):
-    if z_dim is None:
-        return None
-    return torch.randn(1, z_dim, dtype=torch.float32, device=device)
 
 
 def get_pad_img_bbox(sx, ex, sy, ey):
@@ -469,40 +508,26 @@ def main(
 
     # Generate latent codes
     logging.info("Generating latent codes ...")
-    bg_z = get_z(
-        gancraft_bg.output_device, gancraft_bg.module.cfg.NETWORK.GANCRAFT.STYLE_DIM
+    bg_z, building_zs = get_latent_codes(
+        building_stats,
+        gancraft_bg.module.cfg.NETWORK.GANCRAFT.STYLE_DIM,
+        gancraft_bg.output_device,
     )
-    building_zs = {
-        (i + CONSTANTS["BLD_INS_LABEL_MIN"]) * 2: get_z(gancraft_bg.output_device)
-        for i in range(len(building_stats))
-    }
 
     # Simply use image center as the patch center
     cy, cx = seg.shape[0] // 2, seg.shape[1] // 2
     # Generate local image patch of the height field and seg map
     part_hf, part_seg = get_part_hf_seg(hf, seg, cx, cy)
 
+    # Recalculate the building positions based on the current patch
+    _building_stats = get_part_building_stats(part_seg, building_stats, cx, cy)
+
     # Build seg_volume
     logging.info("Generating seg volume ...")
     seg_volume = scripts.dataset_generator.get_seg_volume(part_seg, part_hf)
 
-    # Recalculate the building positions based on the current patch
-    _buildings = np.unique(part_seg[part_seg > CONSTANTS["BLD_INS_LABEL_MIN"]])
-    _building_stats = {}
-    for b in _buildings:
-        _b = b // 2 - CONSTANTS["BLD_INS_LABEL_MIN"]
-        _building_stats[b] = [
-            building_stats[_b, 1] - cy + building_stats[_b, 3] / 2,
-            building_stats[_b, 0] - cx + building_stats[_b, 2] / 2,
-        ]
-
-    part_hf = torch.from_numpy(part_hf[None, None, ...]).to(gancraft_bg.output_device)
-    part_seg = torch.from_numpy(part_seg[None, None, ...]).to(gancraft_bg.output_device)
-    part_hf = part_hf / CONSTANTS["LAYOUT_MAX_HEIGHT"]
-    part_seg = utils.helpers.masks_to_onehots(
-        part_seg[:, 0, :, :], CONSTANTS["LAYOUT_N_CLASSES"]
-    )
-    hf_seg = torch.cat([part_hf, part_seg], dim=1)
+    # Generate the concatenated height field and seg. map tensor
+    hf_seg = get_hf_seg_tensor(part_hf, part_seg, gancraft_bg.output_device)
     # print(hf_seg.size())      # torch.Size([1, 8, 1536, 1536])
 
     # TODO: Generate camera trajectories
