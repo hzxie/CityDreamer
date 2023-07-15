@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:25:10
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-16 10:40:30
+# @Last Modified at: 2023-07-15 13:28:13
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -90,6 +90,31 @@ def get_ins_seg_map(seg_map):
         seg_map_rgb[seg_map == i] = get_ins_seg_map.palatte[i]
 
     return Image.fromarray(seg_map_rgb)
+
+
+def get_diffuse_shading_img(seg_map, depth2, raydirs, cam_origin):
+    mc_rgb = np.array(seg_map.convert("RGB"))
+    # Diffused shading, co-located light.
+    first_intersection_depth = depth2[0, :, :, 0, None, :]
+    first_intersection_point = (
+        raydirs * first_intersection_depth + cam_origin[None, None, None, :]
+    )
+    fip_local_coords = torch.remainder(first_intersection_point, 1.0)
+    fip_wall_proximity = torch.minimum(fip_local_coords, 1.0 - fip_local_coords)
+    fip_wall_orientation = torch.argmin(fip_wall_proximity, dim=-1, keepdim=False)
+    # 0: [1,0,0]; 1: [0,1,0]; 2: [0,0,1]
+    lut = torch.tensor(
+        [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
+        dtype=torch.float32,
+        device=fip_wall_orientation.device,
+    )
+    fip_normal = lut[fip_wall_orientation]
+    diffuse_shade = torch.abs(torch.sum(fip_normal * raydirs, dim=-1))
+
+    mc_rgb = mc_rgb.astype(float) / 255
+    mc_rgb = mc_rgb * diffuse_shade.cpu().numpy()
+    mc_rgb = (mc_rgb ** (1 / 2.2)) * 255
+    return Image.fromarray(mc_rgb.astype(np.uint8))
 
 
 def masks_to_onehots(masks, n_class, ignored_classes=[]):

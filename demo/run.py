@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-06-30 10:12:55
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-15 07:37:08
+# @Last Modified at: 2023-07-15 16:43:29
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -27,7 +27,6 @@ DEMO_HOME_DIR = os.path.abspath(os.path.dirname(__file__))
 sys.path.append(os.path.join(DEMO_HOME_DIR, os.path.pardir))
 
 import scripts.inference as inference
-import scripts.dataset_generator as inference_helper
 import utils.helpers
 
 CONSTANTS = {
@@ -43,6 +42,7 @@ MODELS = {
 
 # The Flask application
 app = flask.Flask(__name__)
+app.config["EXECUTOR_PROPAGATE_EXCEPTIONS"] = True
 executor = flask_executor.Executor(app)
 
 
@@ -64,7 +64,6 @@ def upload_image():
 @app.route("/image/<file_name>", methods=["GET"])
 def get_image(file_name):
     file_path = os.path.join(CONSTANTS["UPLOAD_DIR"], file_name)
-    print(file_path, os.path.exists(file_path))
     if not os.path.exists(file_path):
         flask.abort(404)
 
@@ -75,7 +74,6 @@ def get_image(file_name):
 def get_vide_frame(video_name, frame_id):
     frame_id = int(frame_id) if frame_id.isdigit() else 0
     file_path = os.path.join(CONSTANTS["UPLOAD_DIR"], video_name, "%04d.jpg" % frame_id)
-    print(file_path, os.path.exists(file_path))
     if not os.path.exists(file_path):
         flask.abort(404)
 
@@ -159,8 +157,10 @@ def get_seg_volume_rendering(hf, seg, trajectory):
     frames = []
     for t in tqdm(trajectory, desc="Rendering seg volume"):
         tx, ty = int(t["target"]["x"]), int(t["target"]["y"])
-        part_hf, part_seg = inference.get_part_hf_seg(hf, seg, tx, ty)
-        seg_volume = inference_helper.get_seg_volume(part_seg, part_hf)
+        part_hf, part_seg = inference.get_part_hf_seg(
+            hf, seg, tx, ty, inference.CONSTANTS["LAYOUT_VOL_SIZE"]
+        )
+        seg_volume = inference.get_seg_volume(part_hf, part_seg)
         (
             voxel_id,
             depth2,
@@ -179,7 +179,7 @@ def get_seg_volume_rendering(hf, seg, trajectory):
             },
         )
         seg_map = utils.helpers.get_seg_map(voxel_id.squeeze()[..., 0].cpu().numpy())
-        frame = inference_helper._get_diffuse_shading_img(
+        frame = utils.helpers.get_diffuse_shading_img(
             seg_map,
             depth2.squeeze(dim=0).permute(2, 0, 1, 3, 4),
             raydirs.squeeze(dim=0),
@@ -203,11 +203,13 @@ def get_city_rendering(hf, seg, trajectory, output_dir):
     )
     for f_idx, t in enumerate(tqdm(trajectory, desc="Rendering city")):
         tx, ty = int(t["target"]["x"]), int(t["target"]["y"])
-        part_hf, part_seg = inference.get_part_hf_seg(hf, seg, tx, ty)
+        part_hf, part_seg = inference.get_part_hf_seg(
+            hf, seg, tx, ty, inference.CONSTANTS["EXTENDED_VOL_SIZE"]
+        )
         _building_stats = inference.get_part_building_stats(
             part_seg, building_stats, tx, ty
         )
-        seg_volume = inference_helper.get_seg_volume(part_seg, part_hf)
+        seg_volume = inference.get_seg_volume(part_hf, part_seg)
         hf_seg = inference.get_hf_seg_tensor(
             part_hf, part_seg, MODELS["gancraft_bg"].output_device
         )

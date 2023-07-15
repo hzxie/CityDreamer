@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-11 09:35:47
+# @Last Modified at: 2023-07-15 19:12:45
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -31,7 +31,7 @@ sys.path.append(PROJECT_HOME)
 
 import utils.helpers
 import utils.osm_helper
-import extensions.voxlib as voxlib
+import extensions.voxlib
 from extensions.extrude_tensor import TensorExtruder
 
 # Global constants
@@ -72,6 +72,7 @@ def _get_highway_color(map_name, highway_tags):
     if map_name == "height_field":
         return HEIGHTS["ROAD"]
     elif map_name == "seg_map":
+        # return CLASSES["ROAD"]
         # Ignore underground highways
         return (
             CLASSES["NULL"]
@@ -200,7 +201,7 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
         seg_map[green_lands != 0] = CLASSES["GREEN_LANDS"]
         coast_zones = get_coast_zones(osm_tile_img_path, seg_map.shape)
         seg_map[coast_zones != 0] = CLASSES["COAST_ZONES"]
-    # Plot footprint at the end to make building masks more complete
+
     seg_map = utils.osm_helper.plot_footprints(
         "seg_map",
         _get_footprint_color,
@@ -245,12 +246,16 @@ def get_osm_images(osm_file_path, osm_tile_img_path, zoom_level):
     if green_lands is not None:
         green_lands[green_lands != 0] = 1
         # Generate random height field for green lands
-        random_hf_shape = np.ceil(np.array(green_lands.shape).astype(float) / 64).astype(int) * 64
-        random_hf = perlin_numpy.generate_perlin_noise_2d(random_hf_shape, random_hf_shape // 64)
+        random_hf_shape = (
+            np.ceil(np.array(green_lands.shape).astype(float) / 64).astype(int) * 64
+        )
+        random_hf = perlin_numpy.generate_perlin_noise_2d(
+            random_hf_shape, random_hf_shape // 64
+        )
         random_hf = (random_hf + 1) * HEIGHTS["GREEN_LANDS"] + HEIGHTS["GREEN_LANDS"]
         random_hf = random_hf[height_field.shape]
         height_field = height_field * (1 - green_lands) + random_hf * green_lands
-    # Follow the order in plotting seg maps
+
     height_field = utils.osm_helper.plot_footprints(
         "height_field",
         _get_footprint_color,
@@ -410,31 +415,6 @@ def get_instance_seg_map(seg_map, contours=None, use_contours=False):
     return seg_map.astype(np.int32), stats[:, :4]
 
 
-def _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_origin):
-    mc_rgb = np.array(seg_map.convert("RGB"))
-    # Diffused shading, co-located light.
-    first_intersection_depth = depth2[0, :, :, 0, None, :]
-    first_intersection_point = (
-        raydirs * first_intersection_depth + cam_origin[None, None, None, :]
-    )
-    fip_local_coords = torch.remainder(first_intersection_point, 1.0)
-    fip_wall_proximity = torch.minimum(fip_local_coords, 1.0 - fip_local_coords)
-    fip_wall_orientation = torch.argmin(fip_wall_proximity, dim=-1, keepdim=False)
-    # 0: [1,0,0]; 1: [0,1,0]; 2: [0,0,1]
-    lut = torch.tensor(
-        [[1, 0, 0], [0, 1, 0], [0, 0, 1]],
-        dtype=torch.float32,
-        device=fip_wall_orientation.device,
-    )
-    fip_normal = lut[fip_wall_orientation]
-    diffuse_shade = torch.abs(torch.sum(fip_normal * raydirs, dim=-1))
-
-    mc_rgb = mc_rgb.astype(float) / 255
-    mc_rgb = mc_rgb * diffuse_shade.cpu().numpy()
-    mc_rgb = (mc_rgb ** (1 / 2.2)) * 255
-    return Image.fromarray(mc_rgb.astype(np.uint8))
-
-
 def get_seg_volume(part_seg_map, part_hf, tensor_extruder=None):
     if tensor_extruder is None:
         tensor_extruder = TensorExtruder(CONSTANTS["MAX_LAYOUT_HEIGHT"])
@@ -588,7 +568,11 @@ def get_google_earth_aligned_seg_maps(
             dtype=torch.float32,
             device=seg_volume.device,
         )
-        voxel_id, depth2, raydirs = voxlib.ray_voxel_intersection_perspective(
+        (
+            voxel_id,
+            depth2,
+            raydirs,
+        ) = extensions.voxlib.ray_voxel_intersection_perspective(
             seg_volume,
             cam_origin,
             viewdir,
@@ -608,7 +592,9 @@ def get_google_earth_aligned_seg_maps(
                 voxel_id.squeeze()[..., 0].cpu().numpy()
             )
             seg_maps.append(
-                _get_diffuse_shading_img(seg_map, depth2, raydirs, cam_origin)
+                utils.helpers.get_diffuse_shading_img(
+                    seg_map, depth2, raydirs, cam_origin
+                )
             )
         else:
             seg_maps.append(

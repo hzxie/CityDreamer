@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 14:08:59
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-15 08:10:13
+ * @Last Modified at: 2023-07-15 19:14:19
  * @Email:  root@haozhexie.com
  */
 
@@ -612,8 +612,13 @@ function waitForVideoRendering(videoName, nFrames) {
 }
 
 $(".primary.button", ".render.section").on("click", function(e) {
+    clearInterval(playInterval)
+    $("img", ".image-viewer").remove()
+    $(".progress", ".render.section").progress({percent: 0})
+
     $(".primary.button", ".render.section").html("Please wait ...")
     $(".primary.button", ".render.section").attr("disabled", "disabled")
+    $(".green.button", ".render.section").html("Play Video")
     $(".green.button", ".render.section").attr("disabled", "disabled")
     $(".message", ".render.section").addClass("hidden")
     e.preventDefault()
@@ -649,6 +654,7 @@ $(".primary.button", ".render.section").on("click", function(e) {
 
 // Global variables for play/pause videos
 playFrameIdx = 0
+playInterval = null
 $(".green.button", ".render.section").on("click", function(e) {
     let images = $("img", ".image-viewer"),
         currentText = $(".green.button", ".render.section").html()

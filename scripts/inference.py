@@ -4,14 +4,14 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-15 06:37:52
+# @Last Modified at: 2023-07-15 19:15:13
 # @Email:  root@haozhexie.com
 
 import argparse
 import copy
 import cv2
 import logging
-import matplotlib.pyplot as plt
+import math
 import numpy as np
 import os
 import torch
@@ -45,11 +45,13 @@ CONSTANTS = {
     "LAYOUT_N_CLASSES": 7,
     "LAYOUT_VOL_SIZE": 1536,
     "BUILDING_VOL_SIZE": 672,
+    "EXTENDED_VOL_SIZE": 2880,
     "GES_VFOV": 20,
     "GES_IMAGE_HEIGHT": 540,
     "GES_IMAGE_WIDTH": 960,
     "IMAGE_PADDING": 8,
     "N_VOXEL_INTERSECT_SAMPLES": 6,
+    "N_TRAJECTORY_POINTS": 72,
 }
 
 
@@ -137,6 +139,7 @@ def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None):
         size = (CONSTANTS["LAYOUT_VOL_SIZE"],) * 2 if hf_seg is None else hf_seg.shape
 
     ins_seg, building_stats = get_instance_seg_map(seg)
+    hf[hf >= CONSTANTS["LAYOUT_MAX_HEIGHT"]] = CONSTANTS["LAYOUT_MAX_HEIGHT"] - 1
     return hf.astype(np.int32), ins_seg.astype(np.int32), building_stats
 
 
@@ -171,12 +174,12 @@ def get_image_patch(image, cx, cy, patch_size):
     return image[sy:ey, sx:ex]
 
 
-def get_part_hf_seg(hf, seg, cx, cy):
-    part_hf = get_image_patch(hf, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
-    part_seg = get_image_patch(seg, cx, cy, CONSTANTS["LAYOUT_VOL_SIZE"])
+def get_part_hf_seg(hf, seg, cx, cy, patch_size):
+    part_hf = get_image_patch(hf, cx, cy, patch_size)
+    part_seg = get_image_patch(seg, cx, cy, patch_size)
     assert part_hf.shape == (
-        CONSTANTS["LAYOUT_VOL_SIZE"],
-        CONSTANTS["LAYOUT_VOL_SIZE"],
+        patch_size,
+        patch_size,
     ), part_hf.shape
     assert part_hf.shape == part_seg.shape, part_seg.shape
     return part_hf, part_seg
@@ -202,6 +205,31 @@ def get_hf_seg_tensor(part_hf, part_seg, output_device):
         part_seg[:, 0, :, :], CONSTANTS["LAYOUT_N_CLASSES"]
     )
     return torch.cat([part_hf, part_seg], dim=1)
+
+
+def get_seg_volume(part_hf, part_seg):
+    if part_hf.shape == (
+        CONSTANTS["EXTENDED_VOL_SIZE"],
+        CONSTANTS["EXTENDED_VOL_SIZE"],
+    ):
+        part_hf = part_hf[
+            CONSTANTS["BUILDING_VOL_SIZE"] : -CONSTANTS["BUILDING_VOL_SIZE"],
+            CONSTANTS["BUILDING_VOL_SIZE"] : -CONSTANTS["BUILDING_VOL_SIZE"],
+        ]
+        # print(part_hf.shape)  # torch.Size([1, 8, 1536, 1536])
+        part_seg = part_seg[
+            CONSTANTS["BUILDING_VOL_SIZE"] : -CONSTANTS["BUILDING_VOL_SIZE"],
+            CONSTANTS["BUILDING_VOL_SIZE"] : -CONSTANTS["BUILDING_VOL_SIZE"],
+        ]
+        # print(part_seg.shape)  # torch.Size([1, 8, 1536, 1536])
+
+    assert part_hf.shape == (
+        CONSTANTS["LAYOUT_VOL_SIZE"],
+        CONSTANTS["LAYOUT_VOL_SIZE"],
+    )
+    assert part_hf.shape == part_seg.shape, part_seg.shape
+    return scripts.dataset_generator.get_seg_volume(part_seg, part_hf)
+    # print(seg_volume.size())  # torch.Size([1536, 1536, 640])
 
 
 def get_voxel_intersection_perspective(seg_volume, camera_location):
@@ -252,6 +280,19 @@ def get_voxel_intersection_perspective(seg_volume, camera_location):
     )
 
 
+def get_orbit_camera_positions(radius, altitude):
+    camera_positions = []
+    cx = CONSTANTS["LAYOUT_VOL_SIZE"] // 2
+    cy = cx
+    for i in range(CONSTANTS["N_TRAJECTORY_POINTS"]):
+        theta = 2 * math.pi / CONSTANTS["N_TRAJECTORY_POINTS"] * i
+        cam_x = cx + radius * math.cos(theta)
+        cam_y = cy + radius * math.sin(theta)
+        camera_positions.append({"x": cam_x, "y": cam_y, "z": altitude})
+
+    return camera_positions
+
+
 def get_pad_img_bbox(sx, ex, sy, ey):
     psx = sx - CONSTANTS["IMAGE_PADDING"] if sx != 0 else 0
     psy = sy - CONSTANTS["IMAGE_PADDING"] if sy != 0 else 0
@@ -283,6 +324,17 @@ def get_img_without_pad(img, sx, ex, sy, ey, psx, pex, psy, pey):
 def render_bg(
     patch_size, gancraft_bg, hf_seg, voxel_id, depth2, raydirs, cam_origin, z
 ):
+    assert hf_seg.size(2) == CONSTANTS["EXTENDED_VOL_SIZE"]
+    assert hf_seg.size(3) == CONSTANTS["EXTENDED_VOL_SIZE"]
+    hf_seg = hf_seg[
+        :,
+        :,
+        CONSTANTS["BUILDING_VOL_SIZE"] : -CONSTANTS["BUILDING_VOL_SIZE"],
+        CONSTANTS["BUILDING_VOL_SIZE"] : -CONSTANTS["BUILDING_VOL_SIZE"],
+    ]
+    assert hf_seg.size(2) == CONSTANTS["LAYOUT_VOL_SIZE"]
+    assert hf_seg.size(3) == CONSTANTS["LAYOUT_VOL_SIZE"]
+
     blurrer = torchvision.transforms.GaussianBlur(kernel_size=3, sigma=(2, 2))
     _voxel_id = copy.deepcopy(voxel_id)
     _voxel_id[voxel_id >= CONSTANTS["BLD_INS_LABEL_MIN"]] = CONSTANTS["BLD_FACADE_ID"]
@@ -351,8 +403,8 @@ def render_fg(
     _raydirs[_voxel_id[..., 0, 0] == 0] = 0
 
     # Crop the "hf_seg" image using the center of the target building as the reference
-    cx = CONSTANTS["LAYOUT_VOL_SIZE"] // 2 - int(building_stats[1])
-    cy = CONSTANTS["LAYOUT_VOL_SIZE"] // 2 - int(building_stats[0])
+    cx = CONSTANTS["EXTENDED_VOL_SIZE"] // 2 - int(building_stats[1])
+    cy = CONSTANTS["EXTENDED_VOL_SIZE"] // 2 - int(building_stats[0])
     sx = cx - CONSTANTS["BUILDING_VOL_SIZE"] // 2
     ex = cx + CONSTANTS["BUILDING_VOL_SIZE"] // 2
     sy = cy - CONSTANTS["BUILDING_VOL_SIZE"] // 2
@@ -375,12 +427,13 @@ def render_fg(
         dtype=torch.float32,
         device=gancraft_fg.output_device,
     )
-    # Prevent some buildings are out of bound
-    if (
-        _hf_seg.size(2) != CONSTANTS["BUILDING_VOL_SIZE"]
-        or _hf_seg.size(3) != CONSTANTS["BUILDING_VOL_SIZE"]
-    ):
-        return fg_img, fg_mask
+    # Prevent some buildings are out of bound.
+    # THIS SHOULD NEVER HAPPEN AGAIN.
+    # if (
+    #     _hf_seg.size(2) != CONSTANTS["BUILDING_VOL_SIZE"]
+    #     or _hf_seg.size(3) != CONSTANTS["BUILDING_VOL_SIZE"]
+    # ):
+    #     return fg_img, fg_mask
 
     # Render foreground patches by patch to avoid OOM
     for i in range(CONSTANTS["GES_IMAGE_HEIGHT"] // patch_size[0]):
@@ -389,7 +442,7 @@ def render_fg(
             ey, ex = sy + patch_size[0], sx + patch_size[1]
             psx, pex, psy, pey = get_pad_img_bbox(sx, ex, sy, ey)
 
-            if torch.count_nonzero(_raydirs[:, sy:ey, sx:ex] > 0):
+            if torch.count_nonzero(_raydirs[:, sy:ey, sx:ex]) > 0:
                 output_fg = gancraft_fg(
                     _hf_seg,
                     _voxel_id[:, psy:pey, psx:pex],
@@ -517,22 +570,27 @@ def main(
     # Simply use image center as the patch center
     cy, cx = seg.shape[0] // 2, seg.shape[1] // 2
     # Generate local image patch of the height field and seg map
-    part_hf, part_seg = get_part_hf_seg(hf, seg, cx, cy)
+    part_hf, part_seg = get_part_hf_seg(hf, seg, cx, cy, CONSTANTS["EXTENDED_VOL_SIZE"])
+    # print(part_hf.shape)    # (2208, 2208)
+    # print(part_seg.shape)   # (2208, 2208)
 
     # Recalculate the building positions based on the current patch
     _building_stats = get_part_building_stats(part_seg, building_stats, cx, cy)
 
-    # Build seg_volume
-    logging.info("Generating seg volume ...")
-    seg_volume = scripts.dataset_generator.get_seg_volume(part_seg, part_hf)
-
     # Generate the concatenated height field and seg. map tensor
     hf_seg = get_hf_seg_tensor(part_hf, part_seg, gancraft_bg.output_device)
-    # print(hf_seg.size())      # torch.Size([1, 8, 1536, 1536])
+    # print(hf_seg.size())    # torch.Size([1, 8, 2208, 2208])
 
-    # TODO: Generate camera trajectories
+    # Build seg_volume
+    logging.info("Generating seg volume ...")
+    seg_volume = get_seg_volume(part_hf, part_seg)
+
+    # Generate camera trajectories
     logging.info("Generating camera poses ...")
-    cam_pos = [{"x": 767, "y": y, "z": 354} for y in range(517, 117, -20)]
+    radius = np.random.randint(128, 512)
+    altitude = np.random.randint(128, 778)
+    logging.info("Radius = %d, Altitude = %s" % (radius, altitude))
+    cam_pos = get_orbit_camera_positions(radius, altitude)
 
     logging.info("Rendering videos ...")
     frames = []
@@ -556,7 +614,6 @@ def main(
 
 
 if __name__ == "__main__":
-    plt.rcParams["figure.figsize"] = (48, 27)
     logging.basicConfig(
         format="[%(levelname)s] %(asctime)s %(message)s",
         level=logging.INFO,
