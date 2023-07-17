@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 13:42:48
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-15 20:14:37
+# @Last Modified at: 2023-07-16 08:42:13
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/samb-t/unleashing-transformers
 
@@ -155,7 +155,7 @@ class TransformerBlock(torch.nn.Module):
         )
 
     def forward(self, x, layer_past=None, return_present=False):
-        attn, present = self.attn(self.ln1(x), layer_past)
+        attn, present = self.attn(self.ln1(x))
         x = x + attn
         x = x + self.mlp(self.ln2(x))
 
@@ -188,7 +188,7 @@ class CausalSelfAttention(torch.nn.Module):
             cfg.NETWORK.SAMPLER.N_EMBED, cfg.NETWORK.SAMPLER.N_EMBED
         )
 
-    def forward(self, x, layer_past=None):
+    def forward(self, x):
         B, T, C = x.size()
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         k = (

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-15 21:14:17
+# @Last Modified at: 2023-07-17 12:43:06
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -50,8 +50,9 @@ CONSTANTS = {
     "GES_IMAGE_HEIGHT": 540,
     "GES_IMAGE_WIDTH": 960,
     "IMAGE_PADDING": 8,
+    "N_SAMPLER_STEPS": 32,
     "N_VOXEL_INTERSECT_SAMPLES": 6,
-    "N_TRAJECTORY_POINTS": 72,
+    "N_TRAJECTORY_POINTS": 24,
 }
 
 
@@ -92,7 +93,7 @@ def _get_layout_codebook_indexes(sampler, indexes=None):
     with torch.no_grad():
         min_encoding_indices = sampler.module.sample(
             1,
-            sampler.module.cfg.NETWORK.SAMPLER.TOTAL_STEPS,
+            CONSTANTS["N_SAMPLER_STEPS"],
             x_t=indexes,
             device=sampler.output_device,
         )
@@ -100,19 +101,18 @@ def _get_layout_codebook_indexes(sampler, indexes=None):
         return min_encoding_indices.unsqueeze(dim=2)
 
 
-def _get_layout(vqae, sampler, min_encoding_indices):
+def _get_layout(vqae, sampler, min_encoding_indices, codebook):
     with torch.no_grad():
         one_hot = torch.zeros(
             (
                 1,
                 sampler.module.cfg.NETWORK.SAMPLER.BLOCK_SIZE,
-                vqae.module.cfg.NETWORK.VQGAN.N_EMBED,
+                sampler.module.cfg.NETWORK.VQGAN.N_EMBED,
             ),
             device=sampler.output_device,
         )
-        one_hot = one_hot.scatter_(2, min_encoding_indices, 1)
-
-        codebook = vqae.module.quantize.get_codebook()
+        one_hot.scatter_(2, min_encoding_indices, 1)
+        # print(min_encoding_indices, torch.argmax(one_hot, dim=2))
         quant = (
             torch.matmul(
                 one_hot.view(-1, vqae.module.cfg.NETWORK.VQGAN.N_EMBED), codebook
@@ -139,20 +139,24 @@ def generate_city_layout(
     mask=None,
     layout_size=CONSTANTS["EXTENDED_VOL_SIZE"],
 ):
-    # OUTPUT_SIZE == 32
-    # FEATURE_SIZE == 512
-    # SCALE == 16
     OUTPUT_SIZE = vqae.module.cfg.NETWORK.VQGAN.RESOLUTION
     FEATURE_SIZE = vqae.module.cfg.NETWORK.VQGAN.ATTN_RESOLUTION
     SCALE = OUTPUT_SIZE // FEATURE_SIZE
-    STRIDE = FEATURE_SIZE // 2
-    assert STRIDE == 16
+    STRIDE = int(FEATURE_SIZE * 0.75)
+    # assert OUTPUT_SIZE == 512
+    # assert FEATURE_SIZE == 32
+    # assert SCALE == 16
 
+    # Compute the output size and make it compatible to all input sizes as possible
+    window_size = int(math.ceil((layout_size / SCALE - FEATURE_SIZE) / STRIDE) + 1)
+    code_index_size = (window_size - 1) * STRIDE + FEATURE_SIZE
+    output_size = code_index_size * SCALE
+
+    layout = torch.zeros(1, CONSTANTS["LAYOUT_N_CLASSES"], output_size, output_size)
     if hf is None or seg is None:
-        lyt_code_size = layout_size // SCALE
         lyt_code_idx = (
             torch.ones(
-                (1, lyt_code_size, lyt_code_size),
+                (1, code_index_size, code_index_size),
                 device=sampler.output_device,
             ).long()
             * sampler.module.cfg.NETWORK.VQGAN.N_EMBED
@@ -163,37 +167,43 @@ def generate_city_layout(
     if mask is not None:
         raise NotImplementedError
 
-    # Outpainting with 50% overlap (determined by STRIDE)
-    layout = torch.zeros(1, 7, layout_size, layout_size)
-    for i in range(lyt_code_size // STRIDE - 1):
-        for j in range(lyt_code_size // STRIDE - 1):
-            rs = i * STRIDE
-            cs = j * STRIDE
-            part_lyt_code_idx = lyt_code_idx[
-                :, rs : rs + FEATURE_SIZE, cs : cs + FEATURE_SIZE
-            ]
-            # Use sample to predict code indexes
-            lyt_code_idx[
-                :, rs : rs + FEATURE_SIZE, cs : cs + FEATURE_SIZE
-            ] = _get_layout_codebook_indexes(
-                sampler, indexes=part_lyt_code_idx.reshape(1, -1)
-            ).reshape(
-                1, FEATURE_SIZE, FEATURE_SIZE
-            )
-            # Use VQVAE to generate layouts
-            rs *= SCALE
-            cs *= SCALE
-            layout[..., rs : rs + OUTPUT_SIZE, cs : cs + OUTPUT_SIZE] = _get_layout(
-                vqae,
-                sampler,
-                lyt_code_idx[:, rs : rs + FEATURE_SIZE, cs : cs + FEATURE_SIZE],
-            )
+    codebook = vqae.module.quantize.get_codebook()
+    # Single-pass
+    # min_encoding_indices = _get_layout_codebook_indexes(sampler)
+    # layout = _get_layout(vqae, sampler, min_encoding_indices, codebook)
+    # Multi-pass
+    for patch_idx in tqdm(range(window_size**2)):
+        i = patch_idx // window_size
+        j = patch_idx % window_size
+        crs = i * STRIDE
+        ccs = j * STRIDE
+        _code_idx = lyt_code_idx[
+            :, crs : crs + FEATURE_SIZE, ccs : ccs + FEATURE_SIZE
+        ].reshape(1, FEATURE_SIZE**2)
+        _code_idx = _get_layout_codebook_indexes(sampler, _code_idx)
+        _layout = _get_layout(
+            vqae,
+            sampler,
+            _code_idx,
+            codebook,
+        )
+        lrs = crs * SCALE
+        lcs = ccs * SCALE
+        lyt_code_idx[
+            :, crs : crs + FEATURE_SIZE, ccs : ccs + FEATURE_SIZE
+        ] = _code_idx.reshape(1, FEATURE_SIZE, FEATURE_SIZE)
+        layout[..., lrs : lrs + OUTPUT_SIZE, lcs : lcs + OUTPUT_SIZE] = _layout
+
+    # Crop layout to expected output size
+    layout = layout[..., :layout_size, :layout_size]
+    assert layout.size(2) == layout.size(3)
+    assert layout.size(2) == layout_size
 
     hf = layout[0, 0] * CONSTANTS["LAYOUT_MAX_HEIGHT"]
     seg = utils.helpers.onehot_to_mask(
         layout[[0], 1:],
         vqae.module.cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
-    ).squeeze(dim=0)
+    ).squeeze()
     return hf.cpu().numpy().astype(np.int32), seg.cpu().numpy().astype(np.int32)
 
 
@@ -642,15 +652,15 @@ def main(
     cy, cx = seg.shape[0] // 2, seg.shape[1] // 2
     # Generate local image patch of the height field and seg map
     part_hf, part_seg = get_part_hf_seg(hf, seg, cx, cy, CONSTANTS["EXTENDED_VOL_SIZE"])
-    # print(part_hf.shape)    # (2208, 2208)
-    # print(part_seg.shape)   # (2208, 2208)
+    # print(part_hf.shape)    # (2880, 2880)
+    # print(part_seg.shape)   # (2880, 2880)
 
     # Recalculate the building positions based on the current patch
     _building_stats = get_part_building_stats(part_seg, building_stats, cx, cy)
 
     # Generate the concatenated height field and seg. map tensor
     hf_seg = get_hf_seg_tensor(part_hf, part_seg, gancraft_bg.output_device)
-    # print(hf_seg.size())    # torch.Size([1, 8, 2208, 2208])
+    # print(hf_seg.size())    # torch.Size([1, 8, 2880, 2880])
 
     # Build seg_volume
     logging.info("Generating seg volume ...")
