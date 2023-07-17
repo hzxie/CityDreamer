@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-19 15:29:40
+# @Last Modified at: 2023-07-17 15:43:57
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -52,6 +52,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
         self.cfg = cfg
         self.fields = [
             {"name": "hf", "callback": self.get_height_field},
+            {"name": "ctr", "callback": self.get_footprint_contour},
             {"name": "seg", "callback": self.get_seg_map},
         ]
         self.split = split
@@ -86,6 +87,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
         files = [
             {
                 "hf": os.path.join(cfg.DATASETS.OSM_LAYOUT.DIR, c, "hf.png"),
+                "ctr": os.path.join(cfg.DATASETS.OSM_LAYOUT.DIR, c, "ctr.png"),
                 "seg": os.path.join(cfg.DATASETS.OSM_LAYOUT.DIR, c, "seg.png"),
             }
             for c in cities
@@ -110,6 +112,10 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
         )
 
     @classmethod
+    def get_footprint_contour(self, footprint_ctr_file_path, _=None):
+        return np.array(utils.io.IO.get(footprint_ctr_file_path).convert("L")) / 255.0
+
+    @classmethod
     def get_seg_map(self, seg_map_file_path, _=None):
         return np.array(utils.io.IO.get(seg_map_file_path).convert("P"))
 
@@ -123,12 +129,12 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                             "height": cfg.NETWORK.VQGAN.RESOLUTION,
                             "width": cfg.NETWORK.VQGAN.RESOLUTION,
                         },
-                        "objects": ["hf", "seg"],
+                        "objects": ["hf", "ctr", "seg"],
                     },
                     {
                         "callback": "RandomFlip",
                         "parameters": None,
-                        "objects": ["hf", "seg"],
+                        "objects": ["hf", "ctr", "seg"],
                     },
                     {
                         "callback": "ToOneHot",
@@ -141,7 +147,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                     {
                         "callback": "ToTensor",
                         "parameters": None,
-                        "objects": ["hf", "seg"],
+                        "objects": ["hf", "ctr", "seg"],
                     },
                 ]
             )
@@ -154,7 +160,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                             "height": cfg.NETWORK.VQGAN.RESOLUTION,
                             "width": cfg.NETWORK.VQGAN.RESOLUTION,
                         },
-                        "objects": ["hf", "seg"],
+                        "objects": ["hf", "ctr", "seg"],
                     },
                     {
                         "callback": "ToOneHot",
@@ -167,7 +173,7 @@ class OsmLayoutDataset(torch.utils.data.Dataset):
                     {
                         "callback": "ToTensor",
                         "parameters": None,
-                        "objects": ["hf", "seg"],
+                        "objects": ["hf", "ctr", "seg"],
                     },
                 ]
             )
