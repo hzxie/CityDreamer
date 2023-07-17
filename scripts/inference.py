@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-17 12:43:06
+# @Last Modified at: 2023-07-17 15:54:58
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -40,7 +40,9 @@ CONSTANTS = {
     "ROAD_ID": 1,
     "BLD_FACADE_ID": 2,
     "BLD_ROOF_ID": 7,
-    "BLD_INS_LABEL_MIN": 10,
+    "MIN_BLD_INS_LABEL": 10,
+    "MIN_BLD_INS_HEIGHT": 50,
+    "MAX_BLD_INS_HEIGHT": 150,
     "LAYOUT_MAX_HEIGHT": 640,
     "LAYOUT_N_CLASSES": 7,
     "LAYOUT_VOL_SIZE": 1536,
@@ -221,6 +223,11 @@ def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None, siz
 
     ins_seg, building_stats = get_instance_seg_map(seg)
     hf[hf >= CONSTANTS["LAYOUT_MAX_HEIGHT"]] = CONSTANTS["LAYOUT_MAX_HEIGHT"] - 1
+    if city_osm_dir is None:
+        logging.info("Smoothing height fields ...")
+        # Smooth the *generated* height fields
+        hf = _get_smoothed_height_field(hf, ins_seg)
+
     return hf.astype(np.int32), ins_seg.astype(np.int32), building_stats
 
 
@@ -232,10 +239,26 @@ def get_instance_seg_map(seg):
     return seg.astype(np.int32), building_stats
 
 
+def _get_smoothed_height_field(hf, seg):
+    buildings = np.unique(seg[seg > CONSTANTS["MIN_BLD_INS_LABEL"]])
+    for b in tqdm(buildings):
+        hf_mean = np.mean(hf[seg == b])
+        hf_smth = (
+            np.random.randint(
+                CONSTANTS["MIN_BLD_INS_HEIGHT"], CONSTANTS["MAX_BLD_INS_HEIGHT"]
+            )
+            if hf_mean < CONSTANTS["MIN_BLD_INS_HEIGHT"]
+            else hf_mean
+        )
+        hf[seg == b] = hf_smth
+
+    return hf
+
+
 def get_latent_codes(building_stats, bg_style_dim, output_device):
     bg_z = _get_z(output_device, bg_style_dim)
     building_zs = {
-        (i + CONSTANTS["BLD_INS_LABEL_MIN"]) * 2: _get_z(output_device)
+        (i + CONSTANTS["MIN_BLD_INS_LABEL"]) * 2: _get_z(output_device)
         for i in range(len(building_stats))
     }
     return bg_z, building_zs
@@ -267,10 +290,10 @@ def get_part_hf_seg(hf, seg, cx, cy, patch_size):
 
 
 def get_part_building_stats(part_seg, building_stats, cx, cy):
-    _buildings = np.unique(part_seg[part_seg > CONSTANTS["BLD_INS_LABEL_MIN"]])
+    _buildings = np.unique(part_seg[part_seg > CONSTANTS["MIN_BLD_INS_LABEL"]])
     _building_stats = {}
     for b in _buildings:
-        _b = b // 2 - CONSTANTS["BLD_INS_LABEL_MIN"]
+        _b = b // 2 - CONSTANTS["MIN_BLD_INS_LABEL"]
         _building_stats[b] = [
             building_stats[_b, 1] - cy + building_stats[_b, 3] / 2,
             building_stats[_b, 0] - cx + building_stats[_b, 2] / 2,
@@ -418,7 +441,7 @@ def render_bg(
 
     blurrer = torchvision.transforms.GaussianBlur(kernel_size=3, sigma=(2, 2))
     _voxel_id = copy.deepcopy(voxel_id)
-    _voxel_id[voxel_id >= CONSTANTS["BLD_INS_LABEL_MIN"]] = CONSTANTS["BLD_FACADE_ID"]
+    _voxel_id[voxel_id >= CONSTANTS["MIN_BLD_INS_LABEL"]] = CONSTANTS["BLD_FACADE_ID"]
     assert (_voxel_id < CONSTANTS["LAYOUT_N_CLASSES"]).all()
     bg_img = torch.zeros(
         1,
@@ -583,7 +606,7 @@ def render(
     voxel_id, depth2, raydirs, cam_origin = get_voxel_intersection_perspective(
         seg_volume, cam_pos
     )
-    buildings = torch.unique(voxel_id[voxel_id > CONSTANTS["BLD_INS_LABEL_MIN"]])
+    buildings = torch.unique(voxel_id[voxel_id > CONSTANTS["MIN_BLD_INS_LABEL"]])
     # Remove odd numbers from the list because they are reserved by roofs.
     buildings = buildings[buildings % 2 == 0]
     with torch.no_grad():
@@ -669,7 +692,7 @@ def main(
     # Generate camera trajectories
     logging.info("Generating camera poses ...")
     radius = np.random.randint(128, 512)
-    altitude = np.random.randint(128, 778)
+    altitude = np.random.randint(256, 512)
     logging.info("Radius = %d, Altitude = %s" % (radius, altitude))
     cam_pos = get_orbit_camera_positions(radius, altitude)
 
