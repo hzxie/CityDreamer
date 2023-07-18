@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 15:37:23
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-12 14:51:38
+ * @Last Modified at: 2023-07-18 14:45:06
  * @Email:  root@haozhexie.com
  */
 
@@ -72,6 +72,9 @@
             }
             if (options["hideAfterUpload"]) {
                 container.addClass("hidden uploaded")
+            }
+            if (options["callback"]) {
+                options["callback"]()
             }
         });
         return this;

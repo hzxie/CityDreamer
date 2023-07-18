@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-17 15:54:58
+# @Last Modified at: 2023-07-18 16:34:13
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -44,6 +44,7 @@ CONSTANTS = {
     "MIN_BLD_INS_HEIGHT": 50,
     "MAX_BLD_INS_HEIGHT": 150,
     "LAYOUT_MAX_HEIGHT": 640,
+    "LAYOUT_N_CHANNELS": 7,
     "LAYOUT_N_CLASSES": 7,
     "LAYOUT_VOL_SIZE": 1536,
     "BUILDING_VOL_SIZE": 672,
@@ -91,7 +92,19 @@ def get_models(sampler_ckpt, gancraft_bg_ckpt, gancraft_fg_ckpt):
     return vqae, sampler, gancraft_bg, gancraft_fg
 
 
-def _get_layout_codebook_indexes(sampler, indexes=None):
+def _get_layout_codebook_indexes(lyt_code_idx, mask_info, scale):
+    # assert lyt_code_idx is not None and mask is not None
+    mask = np.zeros_like(lyt_code_idx)
+    sx = int(mask_info["left"] // scale)
+    sy = int(mask_info["top"] // scale)
+    ex = int(sx + mask_info["width"] // scale)
+    ey = int(sy + mask_info["height"] // scale)
+    mask[:, sy:ey, sx:ex] = 1
+    lyt_code_idx = lyt_code_idx * (1 - mask) + mask_info["value"] * mask
+    return lyt_code_idx
+
+
+def _get_random_layout_codebook_indexes(sampler, indexes=None):
     with torch.no_grad():
         min_encoding_indices = sampler.module.sample(
             1,
@@ -100,7 +113,7 @@ def _get_layout_codebook_indexes(sampler, indexes=None):
             device=sampler.output_device,
         )
         # print(min_encoding_indices.size())  # torch.Size([bs, att_size**2])
-        return min_encoding_indices.unsqueeze(dim=2)
+        return min_encoding_indices
 
 
 def _get_layout(vqae, sampler, min_encoding_indices, codebook):
@@ -136,8 +149,7 @@ def _get_layout(vqae, sampler, min_encoding_indices, codebook):
 def generate_city_layout(
     sampler=None,
     vqae=None,
-    hf=None,
-    seg=None,
+    lyt_code_idx=None,
     mask=None,
     layout_size=CONSTANTS["EXTENDED_VOL_SIZE"],
 ):
@@ -154,8 +166,9 @@ def generate_city_layout(
     code_index_size = (window_size - 1) * STRIDE + FEATURE_SIZE
     output_size = code_index_size * SCALE
 
-    layout = torch.zeros(1, CONSTANTS["LAYOUT_N_CLASSES"], output_size, output_size)
-    if hf is None or seg is None:
+    layout = torch.zeros(1, CONSTANTS["LAYOUT_N_CHANNELS"], output_size, output_size)
+    if lyt_code_idx is None:
+        # Height field and seg. maps have not been generated.
         lyt_code_idx = (
             torch.ones(
                 (1, code_index_size, code_index_size),
@@ -164,14 +177,14 @@ def generate_city_layout(
             * sampler.module.cfg.NETWORK.VQGAN.N_EMBED
         )
     else:
-        raise NotImplementedError
-
-    if mask is not None:
-        raise NotImplementedError
+        # Height field and seg. maps have been generated. Inpainting required.
+        mask["value"] = sampler.module.cfg.NETWORK.VQGAN.N_EMBED
+        lyt_code_idx = _get_layout_codebook_indexes(lyt_code_idx, mask, SCALE)
+        lyt_code_idx = torch.from_numpy(lyt_code_idx).cuda(device=sampler.output_device)
 
     codebook = vqae.module.quantize.get_codebook()
     # Single-pass
-    # min_encoding_indices = _get_layout_codebook_indexes(sampler)
+    # min_encoding_indices = _get_random_layout_codebook_indexes(sampler)
     # layout = _get_layout(vqae, sampler, min_encoding_indices, codebook)
     # Multi-pass
     for patch_idx in tqdm(range(window_size**2)):
@@ -182,11 +195,16 @@ def generate_city_layout(
         _code_idx = lyt_code_idx[
             :, crs : crs + FEATURE_SIZE, ccs : ccs + FEATURE_SIZE
         ].reshape(1, FEATURE_SIZE**2)
-        _code_idx = _get_layout_codebook_indexes(sampler, _code_idx)
+        n_masked_pixels = torch.count_nonzero(
+            _code_idx == sampler.module.cfg.NETWORK.VQGAN.N_EMBED
+        )
+        if n_masked_pixels != 0:
+            _code_idx = _get_random_layout_codebook_indexes(sampler, _code_idx)
+
         _layout = _get_layout(
             vqae,
             sampler,
-            _code_idx,
+            _code_idx.unsqueeze(dim=2),
             codebook,
         )
         lrs = crs * SCALE
@@ -206,7 +224,11 @@ def generate_city_layout(
         layout[[0], 1:],
         vqae.module.cfg.DATASETS.OSM_LAYOUT.IGNORED_CLASSES,
     ).squeeze()
-    return hf.cpu().numpy().astype(np.int32), seg.cpu().numpy().astype(np.int32)
+    return (
+        hf.cpu().numpy().astype(np.int32),
+        seg.cpu().numpy().astype(np.int32),
+        lyt_code_idx,
+    )
 
 
 def get_osm_city_layout(city_osm_dir):

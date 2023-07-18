@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-06-30 10:12:55
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-15 16:43:29
+# @Last Modified at: 2023-07-18 16:02:18
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -101,6 +101,44 @@ def get_video(file_name):
         flask.abort(404)
 
     return flask.send_file(file_path, mimetype="video/mp4")
+
+
+@app.route("/layout/generate.action", methods=["POST"])
+def get_city_layout():
+    hf_filename = flask.request.form.get("hf")
+    seg_filename = flask.request.form.get("seg")
+    size = flask.request.form.get("size")
+    size = int(size) if size.isdigit() else 4096
+    mask = None
+    try:
+        mask = json.loads(flask.request.form.get("mask"))
+    except Exception:
+        pass
+
+    # Generate layout name
+    layout_name = None
+    lyt_code_idx = None
+    layout_file_path = os.path.join(CONSTANTS["UPLOAD_DIR"], "%s-lyt.npy" % layout_name)
+    if hf_filename and seg_filename:
+        layout_name = os.path.commonprefix([hf_filename, seg_filename])
+        if os.path.exists(layout_file_path):
+            lyt_code_idx = np.load(layout_file_path)
+        else:
+            logging.warning("Layout file is not found at %s" % layout_file_path)
+    else:
+        layout_name = str(uuid.uuid4())
+        hf_filename = "%s-hf.png" % layout_name
+        seg_filename = "%s-seg.png" % layout_name
+
+    hf, seg, lyt_code_idx = inference.generate_city_layout(
+        MODELS["sampler"], MODELS["vqae"], lyt_code_idx, mask, size
+    )
+    Image.fromarray(hf).save(os.path.join(CONSTANTS["UPLOAD_DIR"], hf_filename))
+    utils.helpers.get_seg_map(seg).save(
+        os.path.join(CONSTANTS["UPLOAD_DIR"], seg_filename)
+    )
+    np.save(layout_file_path, lyt_code_idx.cpu().numpy())
+    return flask.jsonify({"hfFileName": hf_filename, "segFileName": seg_filename})
 
 
 @app.route("/trajectory/preview.action", methods=["POST"])

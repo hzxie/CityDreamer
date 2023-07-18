@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 14:08:59
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-15 19:14:19
+ * @Last Modified at: 2023-07-18 15:25:55
  * @Email:  root@haozhexie.com
  */
 
@@ -48,9 +48,17 @@ function setUpCanvas(canvas, options) {
                 "left": canvas._objects[i].left
             }
         }
+        if (options["bind:transform"]) {
+            for (let i = 0; i < options["bind:transform"]._objects.length; ++ i) {
+                options["bind:transform"]._objects[i].origin = {
+                    "top": options["bind:transform"]._objects[i].top,
+                    "left": options["bind:transform"]._objects[i].left
+                }
+            }
+        }
         // Create an initial shape in edit mode
         if (canvas.isEditMode) {
-            options = {
+            let options = {
                 "left": canvas.pointer.abs.x,
                 "top": canvas.pointer.abs.y,
                 "hasControls": false,
@@ -170,7 +178,6 @@ function setUpCanvas(canvas, options) {
                 x: opt.e.offsetX,
                 y: opt.e.offsetY
             }, zoom)
-
             if (options["bind:transform"] !== undefined) {
                 let scale = options["bind:transform"].width / canvas.width
                 options["bind:transform"].zoomToPoint({
@@ -203,13 +210,18 @@ function setUpCanvas(canvas, options) {
             if (options["bind:transform"]) {
                 let currImg = canvas.backgroundImage,
                     bindImg = options["bind:transform"].backgroundImage,
+                    bindObjects = options["bind:transform"]._objects,
                     scale = options["bind:transform"].width / canvas.width
                 
                 if (currImg === null || bindImg === null) {
                     return
                 }
                 bindImg.top = currImg.top * scale
-                bindImg.left = currImg.left * scale
+                bindImg.left = currImg.left * scale    
+                for (let i = 0; i < bindObjects.length; ++ i) {
+                    bindObjects[i].top = bindObjects[i].origin.top + deltaY * scale
+                    bindObjects[i].left = bindObjects[i].origin.left + deltaX * scale
+                }
                 options["bind:transform"].renderAll()
             }
         })
@@ -245,6 +257,9 @@ function setUpCanvas(canvas, options) {
             let uniqueObject = canvas._objects[0],
                 currentPointer = canvas.getPointer(e.pointer)
 
+            if (!uniqueObject) {
+                return
+            }
             // Update canvas shape on mouse move
             if (canvas.shape === "polyline") {
                 uniqueObject.points[uniqueObject.points.length - 1] = currentPointer
@@ -397,12 +412,18 @@ setUpCanvas(camTrjCanvas, {
 $("#seg-map-uploader").imgdrop({
     "viewer": segMapCanvas,
     "putUrl": "/image/upload.action",
-    "getUrl": "/image/"
+    "getUrl": "/image/",
+    "callback": function() {
+        $("#layout-data-src").parent().addClass("disabled")
+    }
 })
 $("#hf-uploader").imgdrop({
     "viewer": hfCanvas,
     "putUrl": "/image/upload.action",
-    "getUrl": "/image/"
+    "getUrl": "/image/",
+    "callback": function() {
+        $("#layout-data-src").parent().addClass("disabled")
+    }
 })
 
 // Set up dropdowns
@@ -416,7 +437,7 @@ $("#layout-data-src").on("change", function() {
         $(".two.wide.field", ".layout.section .fields").removeClass("hidden")
     } else if ($(this).val() == "osm") {
         $(".imgdrop").each(function() {
-            if (!$(this).hasClass("uploaded")) {
+            if (!$(this).hasClass("uploaded") ) {
                 $(this).removeClass("hidden")
             }
         })
@@ -438,6 +459,133 @@ $("#trajectory-mode").on("change", function() {
 })
 
 // Set up events on button clicks
+$(".primary.button", ".layout.section").on("click", function(e) {
+    $("#layout-data-src").parent().addClass("disabled")
+    $("#layout-size").parent().addClass("disabled")
+    $(".primary.button", ".layout.section").html("Please wait ...")
+    $(".primary.button", ".layout.section").attr("disabled", "disabled")
+    // Reset transform
+    resetCanvasTransform(segMapCanvas)
+    resetCanvasTransform(hfCanvas)
+
+    e.preventDefault()
+    let layoutSize = $("#layout-size").dropdown("get value"),
+        hfFileName = hfCanvas.filename || null,
+        segFileName = segMapCanvas.filename || null,
+        mask = getMask(segMapCanvas)
+
+    $.post({
+        "url": "/layout/generate.action",
+        "data": {
+            "hf": hfFileName,
+            "seg": segFileName,
+            "size": layoutSize,
+            "mask": JSON.stringify(mask)
+        },
+        "dataType": "json"
+    }).done(function(resp) {
+        setCanvasBgImage(hfCanvas, resp["hfFileName"], "/image/%s".format(resp["hfFileName"]))
+        setCanvasBgImage(segMapCanvas, resp["segFileName"], "/image/%s".format(resp["segFileName"]))
+        $(".primary.button", ".layout.section").html("Generate")
+        $(".primary.button", ".layout.section").removeAttr("disabled")
+    })
+})
+
+function resetCanvasTransform(canvas) {
+    if (!canvas.backgroundImage) {
+        return
+    }
+    canvas.setViewportTransform([1, 0, 0, 1, 0, 0])
+    for (let i = 0; i < canvas._objects.length; ++ i) {
+        canvas._objects[i].top -= canvas.backgroundImage.top
+        canvas._objects[i].left -= canvas.backgroundImage.left
+    }
+    canvas.backgroundImage.top = 0
+    canvas.backgroundImage.left = 0
+    canvas.renderAll()
+}
+
+function getMask(canvas) {
+    let uniqueObject = canvas._objects[0],
+        backgroundImage = canvas.backgroundImage,
+        scale = backgroundImage ? backgroundImage.scaleX : 1
+
+    if (!uniqueObject) {
+        return null
+    }
+    return {
+        "top": uniqueObject.top / scale,
+        "left": uniqueObject.left / scale,
+        "height": uniqueObject.height / scale,
+        "width": uniqueObject.width / scale
+    }
+}
+
+function setCanvasBgImage(canvas, filename, imgUrl) {
+    canvas.clear()
+    canvas.filename = filename
+    fabric.Image.fromURL(imgUrl, function(img) {
+        canvas.setBackgroundImage(
+            img,
+            canvas.renderAll.bind(canvas), 
+            {
+                originX: 'left',
+                originY: 'top',
+                left: 0,
+                top: 0,
+                scaleX: canvas.width / img.width,
+                scaleY: canvas.height / img.height
+            }
+        )
+        canvas.fire("object:added", {target: img})
+    })
+}
+
+$(".primary.button", ".trajectory.section").on("click", function(e) {
+    $(".primary.button", ".trajectory.section").html("Please wait ...")
+    $(".primary.button", ".trajectory.section").attr("disabled", "disabled")
+    $(".message", ".trajectory.section").addClass("hidden")
+    e.preventDefault()
+
+    let errorMessage = "",
+        trajectory = getTrajectory(),
+        segFileName = segMapCanvas.filename,
+        hfFileName = hfCanvas.filename
+    if (segFileName === undefined || hfFileName === undefined) {
+        errorMessage = "Please generate Segmentation Map and Height Field first."
+    } else if (trajectory.length == 0) {
+        errorMessage = "Please draw the camera trajectory on Camera Trajectory Configurator."
+    }
+    if (errorMessage) {
+        $(".message", ".trajectory.section").html(errorMessage)
+        $(".message", ".trajectory.section").removeClass("hidden")
+        $(".primary.button", ".trajectory.section").html("Preview Trajectory")
+        $(".primary.button", ".trajectory.section").removeAttr("disabled")
+        return
+    }
+
+    $.post({
+        "url": "/trajectory/preview.action",
+        "data": {
+            "hf": hfFileName,
+            "seg": segFileName,
+            "trajectory": JSON.stringify(trajectory)
+        },
+        "dataType": "json"
+    }).done(function(resp) {
+        if (resp["filename"]) {
+            $("video", ".modal").attr("src", "/video/%s".format(resp["filename"]))
+            $(".ui.basic.modal").modal("show")
+        } else {
+            errorMessage = "Error occurred while rendering the video."
+            $(".message", ".trajectory.section").html(errorMessage)
+            $(".message", ".trajectory.section").removeClass("hidden")
+        }
+        $(".primary.button", ".trajectory.section").html("Preview Trajectory")
+        $(".primary.button", ".trajectory.section").removeAttr("disabled")
+    })
+})
+
 function getTrajectory() {
     let trajectory = [],
         altitude = $("#cam-altitude").slider("get value"),
@@ -521,50 +669,6 @@ function getKeypointsTrajectory(object, altitude, elevation, stepSize, scale) {
     return []
 }
 
-$(".primary.button", ".trajectory.section").on("click", function(e) {
-    $(".primary.button", ".trajectory.section").html("Please wait ...")
-    $(".primary.button", ".trajectory.section").attr("disabled", "disabled")
-    $(".message", ".trajectory.section").addClass("hidden")
-    e.preventDefault()
-
-    let errorMessage = "",
-        trajectory = getTrajectory(),
-        segFileName = segMapCanvas.filename,
-        hfFileName = hfCanvas.filename
-    if (segFileName === undefined || hfFileName === undefined) {
-        errorMessage = "Please generate Segmentation Map and Height Field first."
-    } else if (trajectory.length == 0) {
-        errorMessage = "Please draw the camera trajectory on Camera Trajectory Configurator."
-    }
-    if (errorMessage) {
-        $(".message", ".trajectory.section").html(errorMessage)
-        $(".message", ".trajectory.section").removeClass("hidden")
-        $(".primary.button", ".trajectory.section").html("Preview Trajectory")
-        $(".primary.button", ".trajectory.section").removeAttr("disabled")
-        return
-    }
-    $.post({
-        "url": "/trajectory/preview.action",
-        "data": {
-            "hf": hfFileName,
-            "seg": segFileName,
-            "trajectory": JSON.stringify(trajectory)
-        },
-        "dataType": "json"
-    }).done(function(resp) {
-        if (resp["filename"]) {
-            $("video", ".modal").attr("src", "/video/%s".format(resp["filename"]))
-            $(".ui.basic.modal").modal("show")
-        } else {
-            errorMessage = "Error occurred while rendering the video."
-            $(".message", ".trajectory.section").html(errorMessage)
-            $(".message", ".trajectory.section").removeClass("hidden")
-        }
-        $(".primary.button", ".trajectory.section").html("Preview Trajectory")
-        $(".primary.button", ".trajectory.section").removeAttr("disabled")
-    })
-})
-
 $(".red.button", ".trajectory.section").on("click", function(e) {
     e.preventDefault()
     if (camTrjCanvas.shape !== "polyline")  {
@@ -588,28 +692,6 @@ $(".red.button", ".trajectory.section").on("click", function(e) {
         camTrjCanvas.renderAll()
     }
 })
-
-function waitForVideoRendering(videoName, nFrames) {
-    let currentFrame = 0,
-        imgRefreshInterval = setInterval(function() {
-            $.get({
-                url: "/image/%s/%s".format(videoName, currentFrame),
-                xhrFields: {responseType: "blob"},
-                success: function (imageBlob) {
-                    let imgUrl = URL.createObjectURL(imageBlob)
-                    $("img", ".image-viewer").addClass("hidden")
-                    $(".image-viewer").append("<img src='%s'>".format(imgUrl))
-                    if (++ currentFrame >= nFrames) {
-                        clearInterval(imgRefreshInterval)
-                        $(".primary.button", ".render.section").html("Render Video")
-                        $(".primary.button", ".render.section").removeAttr("disabled")
-                        $(".green.button", ".render.section").removeAttr("disabled")
-                    }
-                    $(".progress", ".render.section").progress({percent: currentFrame / nFrames * 100})
-                }
-            })
-        }, 5000)
-}
 
 $(".primary.button", ".render.section").on("click", function(e) {
     clearInterval(playInterval)
@@ -651,6 +733,28 @@ $(".primary.button", ".render.section").on("click", function(e) {
         waitForVideoRendering(resp["video"], resp["frames"])
     })
 })
+
+function waitForVideoRendering(videoName, nFrames) {
+    let currentFrame = 0,
+        imgRefreshInterval = setInterval(function() {
+            $.get({
+                url: "/image/%s/%s".format(videoName, currentFrame),
+                xhrFields: {responseType: "blob"},
+                success: function (imageBlob) {
+                    let imgUrl = URL.createObjectURL(imageBlob)
+                    $("img", ".image-viewer").addClass("hidden")
+                    $(".image-viewer").append("<img src='%s'>".format(imgUrl))
+                    if (++ currentFrame >= nFrames) {
+                        clearInterval(imgRefreshInterval)
+                        $(".primary.button", ".render.section").html("Render Video")
+                        $(".primary.button", ".render.section").removeAttr("disabled")
+                        $(".green.button", ".render.section").removeAttr("disabled")
+                    }
+                    $(".progress", ".render.section").progress({percent: currentFrame / nFrames * 100})
+                }
+            })
+        }, 5000)
+}
 
 // Global variables for play/pause videos
 playFrameIdx = 0
