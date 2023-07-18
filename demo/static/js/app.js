@@ -3,7 +3,7 @@
  * @Author: Haozhe Xie
  * @Date:   2023-06-30 14:08:59
  * @Last Modified by: Haozhe Xie
- * @Last Modified at: 2023-07-18 15:25:55
+ * @Last Modified at: 2023-07-18 18:21:57
  * @Email:  root@haozhexie.com
  */
 
@@ -153,6 +153,7 @@ function setUpCanvas(canvas, options) {
                             scaleY: targetCanvas.height / img.height
                         }
                     )
+                    targetCanvas.setViewportTransform([1, 0, 0, 1, 0, 0])
                     targetCanvas.zoomToPoint(
                         new fabric.Point(targetCanvas.width / 2, targetCanvas.height / 2),
                         targetCanvas.getZoom() / Math.max(scaleX, scaleY)
@@ -522,9 +523,9 @@ function getMask(canvas) {
 }
 
 function setCanvasBgImage(canvas, filename, imgUrl) {
-    canvas.clear()
     canvas.filename = filename
     fabric.Image.fromURL(imgUrl, function(img) {
+        canvas.clear()
         canvas.setBackgroundImage(
             img,
             canvas.renderAll.bind(canvas), 

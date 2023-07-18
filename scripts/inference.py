@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-18 16:34:13
+# @Last Modified at: 2023-07-18 18:48:24
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -237,18 +237,17 @@ def get_osm_city_layout(city_osm_dir):
     return hf, seg
 
 
-def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, hf_seg=None, size=None):
+def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, size=None):
     if city_osm_dir is None:
-        hf, seg = generate_city_layout(sampler, vqae, hf_seg, size)
+        hf, seg = generate_city_layout(sampler, vqae, layout_size=size)
     else:
         hf, seg = get_osm_city_layout(city_osm_dir)
 
     ins_seg, building_stats = get_instance_seg_map(seg)
-    hf[hf >= CONSTANTS["LAYOUT_MAX_HEIGHT"]] = CONSTANTS["LAYOUT_MAX_HEIGHT"] - 1
+    hf = clip_height_field(hf)
     if city_osm_dir is None:
-        logging.info("Smoothing height fields ...")
         # Smooth the *generated* height fields
-        hf = _get_smoothed_height_field(hf, ins_seg)
+        hf = get_smoothed_height_field(hf, ins_seg=ins_seg)
 
     return hf.astype(np.int32), ins_seg.astype(np.int32), building_stats
 
@@ -261,10 +260,19 @@ def get_instance_seg_map(seg):
     return seg.astype(np.int32), building_stats
 
 
-def _get_smoothed_height_field(hf, seg):
-    buildings = np.unique(seg[seg > CONSTANTS["MIN_BLD_INS_LABEL"]])
+def clip_height_field(hf):
+    hf[hf >= CONSTANTS["LAYOUT_MAX_HEIGHT"]] = CONSTANTS["LAYOUT_MAX_HEIGHT"] - 1
+    return hf
+
+
+def get_smoothed_height_field(hf, seg=None, ins_seg=None):
+    if ins_seg is None:
+        ins_seg, _ = get_instance_seg_map(seg)
+
+    logging.info("Smoothing height fields ...")
+    buildings = np.unique(ins_seg[ins_seg > CONSTANTS["MIN_BLD_INS_LABEL"]])
     for b in tqdm(buildings):
-        hf_mean = np.mean(hf[seg == b])
+        hf_mean = np.mean(hf[ins_seg == b])
         hf_smth = (
             np.random.randint(
                 CONSTANTS["MIN_BLD_INS_HEIGHT"], CONSTANTS["MAX_BLD_INS_HEIGHT"]
@@ -272,7 +280,7 @@ def _get_smoothed_height_field(hf, seg):
             if hf_mean < CONSTANTS["MIN_BLD_INS_HEIGHT"]
             else hf_mean
         )
-        hf[seg == b] = hf_smth
+        hf[ins_seg == b] = hf_smth
 
     return hf
 
