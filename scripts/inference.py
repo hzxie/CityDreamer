@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-18 18:48:24
+# @Last Modified at: 2023-07-19 10:29:10
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -157,6 +157,7 @@ def generate_city_layout(
     FEATURE_SIZE = vqae.module.cfg.NETWORK.VQGAN.ATTN_RESOLUTION
     SCALE = OUTPUT_SIZE // FEATURE_SIZE
     STRIDE = int(FEATURE_SIZE * 0.75)
+    HALF_OVERLAP = (FEATURE_SIZE - STRIDE) // 2 * SCALE
     # assert OUTPUT_SIZE == 512
     # assert FEATURE_SIZE == 32
     # assert SCALE == 16
@@ -212,12 +213,20 @@ def generate_city_layout(
         lyt_code_idx[
             :, crs : crs + FEATURE_SIZE, ccs : ccs + FEATURE_SIZE
         ] = _code_idx.reshape(1, FEATURE_SIZE, FEATURE_SIZE)
-        layout[..., lrs : lrs + OUTPUT_SIZE, lcs : lcs + OUTPUT_SIZE] = _layout
+
+        src_x = HALF_OVERLAP if True else 0
+        src_y = HALF_OVERLAP if True else 0
+        dst_x_sz = OUTPUT_SIZE - HALF_OVERLAP if True else OUTPUT_SIZE
+        dst_y_sz = OUTPUT_SIZE - HALF_OVERLAP if True else OUTPUT_SIZE
+        layout[..., lrs : lrs + dst_y_sz, lcs : lcs + dst_x_sz] = _layout[..., src_y:, src_x:]
+        # layout[..., lrs : lrs + OUTPUT_SIZE - 128, lcs : lcs + OUTPUT_SIZE - 128] = _layout[..., 128:, 128:]
 
     # Crop layout to expected output size
-    layout = layout[..., :layout_size, :layout_size]
     assert layout.size(2) == layout.size(3)
-    assert layout.size(2) == layout_size
+    valid_size = layout.size(2) - HALF_OVERLAP
+    crop_size = valid_size if valid_size < layout_size else layout_size
+    layout = layout[..., :crop_size, :crop_size]
+    assert layout.size(2) == crop_size
 
     hf = layout[0, 0] * CONSTANTS["LAYOUT_MAX_HEIGHT"]
     seg = utils.helpers.onehot_to_mask(
