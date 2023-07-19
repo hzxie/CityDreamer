@@ -218,7 +218,9 @@ def generate_city_layout(
         src_y = HALF_OVERLAP if True else 0
         dst_x_sz = OUTPUT_SIZE - HALF_OVERLAP if True else OUTPUT_SIZE
         dst_y_sz = OUTPUT_SIZE - HALF_OVERLAP if True else OUTPUT_SIZE
-        layout[..., lrs : lrs + dst_y_sz, lcs : lcs + dst_x_sz] = _layout[..., src_y:, src_x:]
+        layout[..., lrs : lrs + dst_y_sz, lcs : lcs + dst_x_sz] = _layout[
+            ..., src_y:, src_x:
+        ]
         # layout[..., lrs : lrs + OUTPUT_SIZE - 128, lcs : lcs + OUTPUT_SIZE - 128] = _layout[..., 128:, 128:]
 
     # Crop layout to expected output size

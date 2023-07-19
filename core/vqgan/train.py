@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-26 15:54:22
+# @Last Modified at: 2023-07-19 13:04:51
 # @Email:  root@haozhexie.com
 
 import logging
@@ -13,6 +13,7 @@ import torch
 import shutil
 
 import core.vqgan.test
+import losses.smoothness
 import models.vqgan
 import utils.average_meter
 import utils.datasets
@@ -80,6 +81,16 @@ def train(cfg):
     # Set up loss functions
     l1_loss = torch.nn.L1Loss()
     ce_loss = torch.nn.CrossEntropyLoss()
+    smooth_loss = losses.smoothness.SmoothnessLoss(
+        use_diag=cfg.TRAIN.VQGAN.SMOOTH_LOSS_USE_DIAG,
+        size=(
+            cfg.TRAIN.VQGAN.BATCH_SIZE,
+            1,
+            cfg.NETWORK.VQGAN.RESOLUTION,
+            cfg.NETWORK.VQGAN.RESOLUTION,
+        ),
+        device=vqae.device,
+    )
 
     # Load the pretrained model if exists
     init_epoch = 0
@@ -105,8 +116,8 @@ def train(cfg):
         epoch_start_time = time()
         batch_time = utils.average_meter.AverageMeter()
         data_time = utils.average_meter.AverageMeter()
-        losses = utils.average_meter.AverageMeter(
-            ["RecLoss", "SegLoss", "QuantLoss", "TotalLoss"]
+        train_losses = utils.average_meter.AverageMeter(
+            ["RecLoss", "SmthLoss", "SegLoss", "QuantLoss", "TotalLoss"]
         )
         # Randomize the DistributedSampler
         if train_sampler:
@@ -120,16 +131,19 @@ def train(cfg):
             input = utils.helpers.var_or_cuda(data["img"], vqae.device)
             output = utils.helpers.var_or_cuda(data["img"], vqae.device)
             pred, quant_loss = vqae(input)
-            rec_loss = l1_loss(pred[:, 0], output[:, 0])
+            rec_loss = l1_loss(pred[:, [0]], output[:, [0]])
+            smth_loss = smooth_loss(pred[:, [0]], output[:, [0]])
             seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
             loss = (
                 rec_loss * cfg.TRAIN.VQGAN.REC_LOSS_FACTOR
+                + smth_loss * cfg.TRAIN.VQGAN.SMOOTH_LOSS_FACTOR
                 + seg_loss * cfg.TRAIN.VQGAN.SEG_LOSS_FACTOR
                 + quant_loss
             )
-            losses.update(
+            train_losses.update(
                 [
                     rec_loss.item(),
+                    smth_loss.item(),
                     seg_loss.item(),
                     quant_loss.item(),
                     loss.item(),
@@ -144,10 +158,11 @@ def train(cfg):
             if utils.distributed.is_master():
                 tb_writer.add_scalars(
                     {
-                        "VQGAN/Loss/Batch/Rec": losses.val(0),
-                        "VQGAN/Loss/Batch/Seg": losses.val(1),
-                        "VQGAN/Loss/Batch/Quant": losses.val(2),
-                        "VQGAN/Loss/Batch/Total": losses.val(3),
+                        "VQGAN/Loss/Batch/Rec": train_losses.val(0),
+                        "VQGAN/Loss/Batch/Smth": train_losses.val(1),
+                        "VQGAN/Loss/Batch/Seg": train_losses.val(2),
+                        "VQGAN/Loss/Batch/Quant": train_losses.val(3),
+                        "VQGAN/Loss/Batch/Total": train_losses.val(4),
                     },
                     n_itr,
                 )
@@ -160,7 +175,7 @@ def train(cfg):
                         n_batches,
                         batch_time.val(),
                         data_time.val(),
-                        ["%.4f" % l for l in losses.val()],
+                        ["%.4f" % l for l in train_losses.val()],
                     )
                 )
 
@@ -168,10 +183,11 @@ def train(cfg):
         if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
-                    "VQGAN/Loss/Epoch/Rec/Train": losses.avg(0),
-                    "VQGAN/Loss/Epoch/Seg/Train": losses.avg(1),
-                    "VQGAN/Loss/Epoch/Quant/Train": losses.avg(2),
-                    "VQGAN/Loss/Epoch/Total/Train": losses.avg(3),
+                    "VQGAN/Loss/Epoch/Rec/Train": train_losses.avg(0),
+                    "VQGAN/Loss/Epoch/Smth/Train": train_losses.avg(1),
+                    "VQGAN/Loss/Epoch/Seg/Train": train_losses.avg(2),
+                    "VQGAN/Loss/Epoch/Quant/Train": train_losses.avg(3),
+                    "VQGAN/Loss/Epoch/Total/Train": train_losses.avg(4),
                 },
                 epoch_idx,
             )
@@ -181,19 +197,20 @@ def train(cfg):
                     epoch_idx,
                     cfg.TRAIN.VQGAN.N_EPOCHS,
                     epoch_end_time - epoch_start_time,
-                    ["%.4f" % l for l in losses.avg()],
+                    ["%.4f" % l for l in train_losses.avg()],
                 )
             )
 
         # Evaluate the current model
-        losses, key_frames = core.vqgan.test(cfg, val_data_loader, vqae)
+        test_losses, key_frames = core.vqgan.test(cfg, val_data_loader, vqae)
         if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
-                    "VQGAN/Loss/Epoch/Rec/Test": losses.avg(0),
-                    "VQGAN/Loss/Epoch/Seg/Test": losses.avg(1),
-                    "VQGAN/Loss/Epoch/Quant/Test": losses.avg(2),
-                    "VQGAN/Loss/Epoch/Total/Test": losses.avg(3),
+                    "VQGAN/Loss/Epoch/Rec/Test": test_losses.avg(0),
+                    "VQGAN/Loss/Epoch/Smth/Test": test_losses.avg(1),
+                    "VQGAN/Loss/Epoch/Seg/Test": test_losses.avg(2),
+                    "VQGAN/Loss/Epoch/Quant/Test": test_losses.avg(3),
+                    "VQGAN/Loss/Epoch/Total/Test": test_losses.avg(4),
                 },
                 epoch_idx,
             )

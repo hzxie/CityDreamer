@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:37
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-26 15:56:18
+# @Last Modified at: 2023-07-19 13:03:11
 # @Email:  root@haozhexie.com
 
 import logging
@@ -100,7 +100,9 @@ def train(cfg):
         epoch_start_time = time()
         batch_time = utils.average_meter.AverageMeter()
         data_time = utils.average_meter.AverageMeter()
-        losses = utils.average_meter.AverageMeter(["CodeIndexLoss", "Elbo", "RwElbo"])
+        train_losses = utils.average_meter.AverageMeter(
+            ["CodeIndexLoss", "Elbo", "RwElbo"]
+        )
         # Randomize the DistributedSampler
         if train_sampler:
             train_sampler.set_epoch(epoch_idx)
@@ -132,7 +134,7 @@ def train(cfg):
                 logging.warning("Skipping the step with NaN loss")
                 continue
 
-            losses.update(
+            train_losses.update(
                 [code_index_loss.mean().item(), elbo.mean().item(), rw_elbo.item()]
             )
             sampler.zero_grad()
@@ -144,14 +146,14 @@ def train(cfg):
             if utils.distributed.is_master():
                 tb_writer.add_scalars(
                     {
-                        "Sampler/Loss/Batch/CodeIndex": losses.val(0),
-                        "Sampler/Loss/Batch/ELBO": losses.val(1),
-                        "Sampler/Loss/Batch/RwELBO": losses.val(2),
+                        "Sampler/Loss/Batch/CodeIndex": train_losses.val(0),
+                        "Sampler/Loss/Batch/ELBO": train_losses.val(1),
+                        "Sampler/Loss/Batch/RwELBO": train_losses.val(2),
                     },
                     n_itr,
                 )
                 logging.info(
-                    "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) Losses = %s"
+                    "[Epoch %d/%d][Batch %d/%d] BatchTime = %.3f (s) DataTime = %.3f (s) train_losses = %s"
                     % (
                         epoch_idx,
                         cfg.TRAIN.SAMPLER.N_EPOCHS,
@@ -159,7 +161,7 @@ def train(cfg):
                         n_batches,
                         batch_time.val(),
                         data_time.val(),
-                        ["%.4f" % l for l in losses.val()],
+                        ["%.4f" % l for l in train_losses.val()],
                     )
                 )
 
@@ -167,19 +169,19 @@ def train(cfg):
         if utils.distributed.is_master():
             tb_writer.add_scalars(
                 {
-                    "Sampler/Loss/Epoch/CodeIndex/Train": losses.avg(0),
-                    "Sampler/Loss/Epoch/ELBO/Train": losses.avg(1),
-                    "Sampler/Loss/Epoch/RwELBO/Train": losses.avg(2),
+                    "Sampler/Loss/Epoch/CodeIndex/Train": train_losses.avg(0),
+                    "Sampler/Loss/Epoch/ELBO/Train": train_losses.avg(1),
+                    "Sampler/Loss/Epoch/RwELBO/Train": train_losses.avg(2),
                 },
                 epoch_idx,
             )
             logging.info(
-                "[Epoch %d/%d] EpochTime = %.3f (s) Losses = %s"
+                "[Epoch %d/%d] EpochTime = %.3f (s) train_losses = %s"
                 % (
                     epoch_idx,
                     cfg.TRAIN.VQGAN.N_EPOCHS,
                     epoch_end_time - epoch_start_time,
-                    ["%.4f" % l for l in losses.avg()],
+                    ["%.4f" % l for l in train_losses.avg()],
                 )
             )
 

@@ -4,15 +4,13 @@
 # @Author: NVIDIA CORPORATION & AFFILIATES
 # @Date:   2023-05-10 20:08:17
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-05-11 15:31:08
+# @Last Modified at: 2023-07-19 12:59:05
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/NVlabs/imaginaire
 
 import torch
 import torch.nn.functional as F
 import torchvision
-
-import utils.distributed
 
 
 class PerceptualLoss(torch.nn.Module):
