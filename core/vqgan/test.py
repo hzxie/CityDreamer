@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 09:50:44
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-29 12:53:14
+# @Last Modified at: 2023-05-26 15:51:42
 # @Email:  root@haozhexie.com
 
 import logging
@@ -43,13 +43,12 @@ def test(cfg, test_data_loader=None, vqae=None):
 
     # Set up loss functions
     l1_loss = torch.nn.L1Loss()
-    bce_loss = torch.nn.BCELoss()
     ce_loss = torch.nn.CrossEntropyLoss()
 
     # Testing loop
     n_samples = len(test_data_loader)
     test_losses = utils.average_meter.AverageMeter(
-        ["RecLoss", "CtrLoss", "SegLoss", "QuantLoss", "TotalLoss"]
+        ["RecLoss", "SegLoss", "QuantLoss", "TotalLoss"]
     )
     key_frames = {}
     for idx, data in enumerate(test_data_loader):
@@ -58,18 +57,15 @@ def test(cfg, test_data_loader=None, vqae=None):
             output = utils.helpers.var_or_cuda(data["img"], vqae.device)
             pred, quant_loss = vqae(input)
             rec_loss = l1_loss(pred[:, 0], output[:, 0])
-            ctr_loss = bce_loss(torch.sigmoid(pred[:, 1]), output[:, 1])
-            seg_loss = ce_loss(pred[:, 2:], torch.argmax(output[:, 2:], dim=1))
+            seg_loss = ce_loss(pred[:, 1:], torch.argmax(output[:, 1:], dim=1))
             loss = (
                 rec_loss * cfg.TRAIN.VQGAN.REC_LOSS_FACTOR
-                + ctr_loss * cfg.TRAIN.VQGAN.CTR_LOSS_FACTOR
                 + seg_loss * cfg.TRAIN.VQGAN.SEG_LOSS_FACTOR
                 + quant_loss
             )
             test_losses.update(
                 [
                     rec_loss.item(),
-                    ctr_loss.item(),
                     seg_loss.item(),
                     quant_loss.item(),
                     loss.item(),
@@ -81,18 +77,12 @@ def test(cfg, test_data_loader=None, vqae=None):
             ] = utils.helpers.tensor_to_image(
                 torch.cat([pred[:, 0], output[:, 0]], dim=2), "HeightField"
             )
-            key_frames[
-                "VQGAN/Image/%04d/FootprintCtr" % idx
-            ] = utils.helpers.tensor_to_image(
-                torch.cat([torch.sigmoid(pred[:, 1]), output[:, 1]], dim=2),
-                "FootprintCtr",
-            )
             key_frames["VQGAN/Image/%04d/SegMap" % idx] = utils.helpers.tensor_to_image(
                 utils.helpers.onehot_to_mask(
                     torch.cat(
                         [
-                            pred[:, 2:],
-                            output[:, 2:],
+                            pred[:, 1:],
+                            output[:, 1:],
                         ],
                         dim=3,
                     ),
