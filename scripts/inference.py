@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-31 15:01:28
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-19 10:29:10
+# @Last Modified at: 2023-08-13 15:10:09
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -250,7 +250,7 @@ def get_osm_city_layout(city_osm_dir):
 
 def get_city_layout(city_osm_dir=None, sampler=None, vqae=None, size=None):
     if city_osm_dir is None:
-        hf, seg = generate_city_layout(sampler, vqae, layout_size=size)
+        hf, seg, _ = generate_city_layout(sampler, vqae, layout_size=size)
     else:
         hf, seg = get_osm_city_layout(city_osm_dir)
 
@@ -699,7 +699,9 @@ def main(
     )
     # Generate height fields and seg maps
     logging.info("Generating city layouts ...")
-    hf, seg, building_stats = get_city_layout(None, sampler, vqae)
+    hf, seg, building_stats = get_city_layout(
+        None, sampler, vqae, size=CONSTANTS["EXTENDED_VOL_SIZE"]
+    )
     # hf, seg, building_stats = get_city_layout(city_osm_dir)
     assert hf.shape == seg.shape
     logging.info("City Layout Patch Size (HxW): %s" % (hf.shape,))
