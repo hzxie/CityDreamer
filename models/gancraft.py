@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-12 19:53:21
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-21 20:13:32
+# @Last Modified at: 2024-01-08 16:34:58
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/FrozenBurning/SceneDreamer
 
@@ -49,9 +49,7 @@ class GanCraftGenerator(torch.nn.Module):
                 in_channels=grid_encoder_in_dim,
                 n_levels=cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS,
                 lvl_channels=cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM,
-                desired_resolution=cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
-                if cfg.NETWORK.GANCRAFT.BUILDING_MODE
-                else cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
+                desired_resolution=cfg.NETWORK.GANCRAFT.HASH_GRID_RESOLUTION,
             )
         elif cfg.NETWORK.GANCRAFT.POS_EMD == "SIN_COS":
             self.pos_encoder = SinCosEncoder(cfg)
@@ -149,10 +147,10 @@ class GanCraftGenerator(torch.nn.Module):
             seg_map_bev = torch.gather(voxel_id, -2, new_idx)
             # print(seg_map_bev.size())  # torch.Size([N, H, W, n_samples + 1, 1])
             # In Building Mode, the one more channel is used for building roofs
-            n_seg_map_classes = (
-                self.cfg.DATASETS.OSM_LAYOUT.N_CLASSES + 1
+            n_classes = (
+                self.cfg.NETWORK.GANCRAFT.N_CLASSES + 1
                 if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE
-                else self.cfg.DATASETS.OSM_LAYOUT.N_CLASSES
+                else self.cfg.NETWORK.GANCRAFT.N_CLASSES
             )
             seg_map_bev_onehot = torch.zeros(
                 [
@@ -160,7 +158,7 @@ class GanCraftGenerator(torch.nn.Module):
                     seg_map_bev.size(1),
                     seg_map_bev.size(2),
                     seg_map_bev.size(3),
-                    n_seg_map_classes,
+                    n_classes,
                 ],
                 dtype=torch.float,
                 device=voxel_id.device,
@@ -171,6 +169,7 @@ class GanCraftGenerator(torch.nn.Module):
         net_out_s, net_out_c = self._forward_perpix_sub(
             features, normalized_cord, z, seg_map_bev_onehot
         )
+
         # Blending
         weights = self._volum_rendering_relu(
             net_out_s, new_dists * self.cfg.NETWORK.GANCRAFT.DIST_SCALE, dim=-2
@@ -198,7 +197,7 @@ class GanCraftGenerator(torch.nn.Module):
         rand_depth, new_dists, new_idx = self._sample_depth_batched(
             depth2,
             n_samples + 1,
-            deterministic=False,
+            deterministic=deterministic,
             use_box_boundaries=False,
             sample_depth=3,
         )
@@ -210,15 +209,15 @@ class GanCraftGenerator(torch.nn.Module):
         if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
             assert building_stats is not None
             # Make the building object-centric
-            center_offset = (
-                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE
-                - self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
-            ) / 2
             building_stats = building_stats[:, None, None, None, :].repeat(
                 1, world_coord.size(1), world_coord.size(2), world_coord.size(3), 1
             )
-            world_coord[..., 0] -= building_stats[..., 0] + center_offset
-            world_coord[..., 1] -= building_stats[..., 1] + center_offset
+            world_coord[..., 0] -= (
+                building_stats[..., 0] + self.cfg.NETWORK.GANCRAFT.CENTER_OFFSET
+            )
+            world_coord[..., 1] -= (
+                building_stats[..., 1] + self.cfg.NETWORK.GANCRAFT.CENTER_OFFSET
+            )
             # TODO: Fix non-building rays
             zero_rd_mask = raydirs.repeat(1, 1, 1, n_samples, 1)
             world_coord[zero_rd_mask == 0] = 0
@@ -227,20 +226,9 @@ class GanCraftGenerator(torch.nn.Module):
         return normalized_cord, new_dists, new_idx
 
     def _get_normalized_coordinates(self, world_coord):
-        if self.cfg.NETWORK.GANCRAFT.BUILDING_MODE:
-            h, w, d = (
-                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
-                self.cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,
-                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
-            )
-        else:
-            h, w, d = (
-                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-                self.cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,
-                self.cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT,
-            )
-
-        delimeter = torch.tensor([h, w, d], device=world_coord.device)
+        delimeter = torch.tensor(
+            self.cfg.NETWORK.GANCRAFT.NORMALIZE_DELIMETER, device=world_coord.device
+        )
         normalized_cord = world_coord / delimeter * 2 - 1
         # TODO: Temporary fix
         normalized_cord[normalized_cord > 1] = 1
@@ -475,7 +463,7 @@ class GanCraftGenerator(torch.nn.Module):
 class GlobalEncoder(torch.nn.Module):
     def __init__(self, cfg):
         super(GlobalEncoder, self).__init__()
-        n_classes = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
+        n_classes = cfg.NETWORK.GANCRAFT.N_CLASSES
         self.hf_conv = torch.nn.Conv2d(1, 8, kernel_size=3, stride=2, padding=1)
         self.seg_conv = torch.nn.Conv2d(
             n_classes,
@@ -514,7 +502,7 @@ class GlobalEncoder(torch.nn.Module):
 class LocalEncoder(torch.nn.Module):
     def __init__(self, cfg):
         super(LocalEncoder, self).__init__()
-        n_classes = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
+        n_classes = cfg.NETWORK.GANCRAFT.N_CLASSES
         self.hf_conv = torch.nn.Conv2d(1, 32, kernel_size=7, stride=2, padding=3)
         self.seg_conv = torch.nn.Conv2d(
             n_classes, 32, kernel_size=7, stride=2, padding=3
@@ -623,9 +611,9 @@ class RenderMLP(torch.nn.Module):
                 in_dim = f_dim
 
         self.fc_m_a = torch.nn.Linear(
-            cfg.DATASETS.OSM_LAYOUT.N_CLASSES + 1
+            cfg.NETWORK.GANCRAFT.N_CLASSES + 1
             if cfg.NETWORK.GANCRAFT.BUILDING_MODE
-            else cfg.DATASETS.OSM_LAYOUT.N_CLASSES,
+            else cfg.NETWORK.GANCRAFT.N_CLASSES,
             cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             bias=False,
         )
@@ -678,7 +666,6 @@ class RenderMLP(torch.nn.Module):
                 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
             )
         )
-
         self.fc_sigma = (
             torch.nn.Linear(
                 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
@@ -690,7 +677,6 @@ class RenderMLP(torch.nn.Module):
                 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA,
             )
         )
-
         self.fc_5 = (
             ModLinear(
                 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM,
@@ -1230,7 +1216,7 @@ class GanCraftDiscriminator(torch.nn.Module):
         self.output = torch.nn.Sequential(
             torch.nn.Conv2d(
                 2 * cfg.NETWORK.GANCRAFT.DIS_N_CHANNEL_BASE,
-                cfg.DATASETS.OSM_LAYOUT.N_CLASSES + 1,
+                cfg.NETWORK.GANCRAFT.N_CLASSES + 1,
                 stride=1,
                 kernel_size=1,
                 bias=True,

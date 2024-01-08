@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-19 13:04:59
+# @Last Modified at: 2024-01-08 18:59:47
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -98,9 +98,14 @@ cfg.NETWORK.SAMPLER.TOTAL_STEPS                  = 256
 # GANCraft
 cfg.NETWORK.GANCRAFT                             = EasyDict()
 cfg.NETWORK.GANCRAFT.BUILDING_MODE               = False
+cfg.NETWORK.GANCRAFT.N_CLASSES                   = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
 cfg.NETWORK.GANCRAFT.STYLE_DIM                   = 256
 cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY     = 24
 cfg.NETWORK.GANCRAFT.DIST_SCALE                  = 0.25
+cfg.NETWORK.GANCRAFT.CENTER_OFFSET               = (cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE - cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE) / 2
+cfg.NETWORK.GANCRAFT.NORMALIZE_DELIMETER         = ([cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE,] * 2
+                                                    if cfg.NETWORK.GANCRAFT.BUILDING_MODE
+                                                    else [cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE,] * 2) + [cfg.DATASETS.OSM_LAYOUT.MAX_HEIGHT]
 cfg.NETWORK.GANCRAFT.ENCODER                     = "LOCAL"
 cfg.NETWORK.GANCRAFT.ENCODER_OUT_DIM             = 64 if cfg.NETWORK.GANCRAFT.BUILDING_MODE else 32
 cfg.NETWORK.GANCRAFT.GLOBAL_ENCODER_N_BLOCKS     = 6
@@ -110,6 +115,9 @@ cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_FEATURES     = True
 cfg.NETWORK.GANCRAFT.POS_EMD_INCUDE_CORDS        = False
 cfg.NETWORK.GANCRAFT.HASH_GRID_N_LEVELS          = 16
 cfg.NETWORK.GANCRAFT.HASH_GRID_LEVEL_DIM         = 8
+cfg.NETWORK.GANCRAFT.HASH_GRID_RESOLUTION        = (cfg.DATASETS.GOOGLE_EARTH_BUILDING.VOL_SIZE
+                                                    if cfg.NETWORK.GANCRAFT.BUILDING_MODE
+                                                    else cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE)
 cfg.NETWORK.GANCRAFT.SIN_COS_FREQ_BENDS          = 10
 cfg.NETWORK.GANCRAFT.RENDER_HIDDEN_DIM           = 256
 cfg.NETWORK.GANCRAFT.RENDER_OUT_DIM_SIGMA        = 1
