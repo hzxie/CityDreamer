@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:14:54
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2024-01-08 18:59:47
+# @Last Modified at: 2024-01-09 18:30:16
 # @Email:  root@haozhexie.com
 
 from easydict import EasyDict
@@ -30,6 +30,8 @@ cfg.DATASETS.GOOGLE_EARTH.N_REPEAT               = 1
 cfg.DATASETS.GOOGLE_EARTH.N_VIEWS                = 60
 cfg.DATASETS.GOOGLE_EARTH.DIR                    = "./data/ges"
 cfg.DATASETS.GOOGLE_EARTH.VOL_SIZE               = 1536
+cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID          = 2
+cfg.DATASETS.GOOGLE_EARTH.ROOF_CLS_ID            = 7
 cfg.DATASETS.GOOGLE_EARTH_BUILDING               = EasyDict()
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.PIN_MEMORY    = ["hf", "seg"]
 cfg.DATASETS.GOOGLE_EARTH_BUILDING.N_REPEAT      = 1
@@ -99,6 +101,8 @@ cfg.NETWORK.SAMPLER.TOTAL_STEPS                  = 256
 cfg.NETWORK.GANCRAFT                             = EasyDict()
 cfg.NETWORK.GANCRAFT.BUILDING_MODE               = False
 cfg.NETWORK.GANCRAFT.N_CLASSES                   = cfg.DATASETS.OSM_LAYOUT.N_CLASSES
+cfg.NETWORK.GANCRAFT.FACADE_CLS_ID               = cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID
+cfg.NETWORK.GANCRAFT.ROOF_CLS_ID                 = cfg.DATASETS.GOOGLE_EARTH.ROOF_CLS_ID
 cfg.NETWORK.GANCRAFT.STYLE_DIM                   = 256
 cfg.NETWORK.GANCRAFT.N_SAMPLE_POINTS_PER_RAY     = 24
 cfg.NETWORK.GANCRAFT.DIST_SCALE                  = 0.25

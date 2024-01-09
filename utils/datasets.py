@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-06 10:29:53
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-19 15:29:40
+# @Last Modified at: 2024-01-09 18:37:49
 # @Email:  root@haozhexie.com
 
 import numpy as np
@@ -292,7 +292,6 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
         return (np.array(img) / 255.0 - 0.5) * 2
 
     def _get_data_transforms(self, cfg, split):
-        BULIDING_MASK_ID = 2
         if split == "train":
             return utils.transforms.Compose(
                 [
@@ -307,8 +306,8 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                     {
                         "callback": "BuildingMaskRemap",
                         "parameters": {
-                            "bld_facade_label": BULIDING_MASK_ID,
-                            "bld_roof_label": BULIDING_MASK_ID,
+                            "bld_facade_label": cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
+                            "bld_roof_label": cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
                             "min_bld_ins_id": 10,
                         },
                         "objects": ["voxel_id", "seg"],
@@ -350,8 +349,8 @@ class GoogleEarthDataset(torch.utils.data.Dataset):
                     {
                         "callback": "BuildingMaskRemap",
                         "parameters": {
-                            "bld_facade_label": BULIDING_MASK_ID,
-                            "bld_roof_label": BULIDING_MASK_ID,
+                            "bld_facade_label": cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
+                            "bld_roof_label": cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
                             "min_bld_ins_id": 10,
                         },
                         "objects": ["voxel_id", "seg"],
@@ -496,8 +495,6 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
         return torch.Tensor([dy, dx, h, w, building_id])
 
     def _get_data_transforms(self, cfg, split):
-        BULIDING_FACADE_ID = 2
-        BULIDING_ROOF_ID = 7
         if split == "train":
             return utils.transforms.Compose(
                 [
@@ -505,8 +502,8 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "callback": "BuildingMaskRemap",
                         "parameters": {
                             "attr": "building_id",
-                            "bld_facade_label": BULIDING_FACADE_ID,
-                            "bld_roof_label": BULIDING_ROOF_ID,
+                            "bld_facade_label": cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
+                            "bld_roof_label": cfg.DATASETS.GOOGLE_EARTH.ROOF_CLS_ID,
                             "min_bld_ins_id": 10,
                         },
                         "objects": ["voxel_id", "seg"],
@@ -515,7 +512,10 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "callback": "MaskRaydirs",
                         "parameters": {
                             "attr": "raydirs",
-                            "values": [BULIDING_FACADE_ID, BULIDING_ROOF_ID],
+                            "values": [
+                                cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
+                                cfg.DATASETS.GOOGLE_EARTH.ROOF_CLS_ID,
+                            ],
                         },
                     },
                     {
@@ -523,7 +523,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "parameters": {
                             "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
                             "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
-                            "target_value": BULIDING_FACADE_ID,
+                            "target_value": cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
                         },
                         "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
                     },
@@ -557,8 +557,8 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "callback": "BuildingMaskRemap",
                         "parameters": {
                             "attr": "building_id",
-                            "bld_facade_label": BULIDING_FACADE_ID,
-                            "bld_roof_label": BULIDING_ROOF_ID,
+                            "bld_facade_label": cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
+                            "bld_roof_label": cfg.DATASETS.GOOGLE_EARTH.ROOF_CLS_ID,
                             "min_bld_ins_id": 10,
                         },
                         "objects": ["voxel_id", "seg"],
@@ -567,7 +567,10 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "callback": "MaskRaydirs",
                         "parameters": {
                             "attr": "raydirs",
-                            "values": [BULIDING_FACADE_ID, BULIDING_ROOF_ID],
+                            "values": [
+                                cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
+                                cfg.DATASETS.GOOGLE_EARTH.ROOF_CLS_ID,
+                            ],
                         },
                     },
                     {
@@ -575,7 +578,7 @@ class GoogleEarthBuildingDataset(GoogleEarthDataset):
                         "parameters": {
                             "height": cfg.TRAIN.GANCRAFT.CROP_SIZE[1],
                             "width": cfg.TRAIN.GANCRAFT.CROP_SIZE[0],
-                            "target_value": BULIDING_FACADE_ID,
+                            "target_value": cfg.DATASETS.GOOGLE_EARTH.FACADE_CLS_ID,
                         },
                         "objects": ["voxel_id", "depth2", "raydirs", "footage", "mask"],
                     },

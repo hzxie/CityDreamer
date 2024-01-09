@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-19 19:49:22
+# @Last Modified at: 2024-01-09 18:39:44
 # @Email:  root@haozhexie.com
 
 import copy
@@ -182,11 +182,19 @@ def train(cfg):
                 masks[
                     ~torch.isin(
                         voxel_id[:, None, ..., 0, 0],
-                        torch.tensor([2, 7], device=gancraft_g.device),
+                        torch.tensor(
+                            [
+                                cfg.NETWORK.GAMCRAFT.FACADE_CLS_ID,
+                                cfg.NETWORK.GAMCRAFT.ROOF_CLS_ID,
+                            ],
+                            device=gancraft_g.device,
+                        ),
                     )
                 ] = 0
             else:
-                masks[voxel_id[:, None, ..., 0, 0] == 2] = 0
+                masks[
+                    voxel_id[:, None, ..., 0, 0] == cfg.NETWORK.GAMCRAFT.FACADE_CLS_ID
+                ] = 0
 
             seg_maps = utils.helpers.masks_to_onehots(
                 data["voxel_id"][..., 0, 0], cfg.DATASETS.OSM_LAYOUT.N_CLASSES

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-15 19:48:20
+# @Last Modified at: 2024-01-09 18:48:07
 # @Email:  root@haozhexie.com
 
 import logging
@@ -27,7 +27,7 @@ def test(cfg, test_data_loader=None, gancraft=None):
 
         logging.info("Recovering from %s ..." % (cfg.CONST.CKPT))
         checkpoint = torch.load(cfg.CONST.CKPT)
-        if cfg.TRAIN.GANCRAFT.ENABLE_EMA:
+        if cfg.TRAIN.GANCRAFT.EMA_ENABLED:
             gancraft.load_state_dict(checkpoint["gancraft_g_ema"])
         else:
             gancraft.load_state_dict(checkpoint["gancraft_g"])
@@ -79,7 +79,13 @@ def test(cfg, test_data_loader=None, gancraft=None):
                         masks[
                             torch.isin(
                                 voxel_id[:, None, ..., 0, 0],
-                                torch.tensor([2, 7], device=gancraft.device),
+                                torch.tensor(
+                                    [
+                                        cfg.NETWORK.GAMCRAFT.FACADE_CLS_ID,
+                                        cfg.NETWORK.GAMCRAFT.ROOF_CLS_ID,
+                                    ],
+                                    device=gancraft.device,
+                                ),
                             )
                         ] = 1
                         footage = footage * masks
