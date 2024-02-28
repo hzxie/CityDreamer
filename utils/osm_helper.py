@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-21 16:16:06
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-04-25 13:40:09
+# @Last Modified at: 2024-02-28 18:35:22
 # @Email:  root@haozhexie.com
 
 import cv2
@@ -100,10 +100,10 @@ def get_nodes_lng_lat(osm_file_path, nodes):
 
 def _is_interested_way(tags, interested_tags):
     for it in interested_tags:
-        if type(it) == str:
+        if isinstance(it, str):
             if it in tags:
                 return True
-        elif type(it) == dict:
+        elif isinstance(it, dict):
             if it["k"] in tags and tags[it["k"]] in it["v"]:
                 return True
     return False

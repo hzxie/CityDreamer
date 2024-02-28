@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-08-14 20:08:05
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-08-15 16:10:46
+# @Last Modified at: 2024-02-28 16:35:36
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -40,8 +40,8 @@ def get_connectivity_index(graph):
 
 
 def _is_ending_nodes(node_id, way_id, graph):
-    node_id = int(node_id) if type(node_id) != int else node_id
-    way_id = str(way_id) if type(way_id) != str else way_id
+    node_id = int(node_id) if isinstance(node_id, int) else node_id
+    way_id = str(way_id) if isinstance(way_id, str) else way_id
 
     way_nodes = graph["way"][way_id]["ref_nd"]
     return way_nodes[0] == node_id or way_nodes[-1] == node_id
@@ -60,7 +60,7 @@ def get_convenience(graph, n_samples=1000):
             continue
         try:
             path = dijkstar.find_path(d_graph, n0, n1)
-        except Exception as ex:
+        except Exception:
             # logging.exception(ex)
             continue
 
@@ -85,8 +85,8 @@ def _get_d_graph(graph):
 
 
 def _get_dist(idx0, idx1, graph):
-    idx0 = str(idx0) if type(idx0) != str else idx0
-    idx1 = str(idx1) if type(idx1) != str else idx1
+    idx0 = str(idx0) if isinstance(idx0, str) else idx0
+    idx1 = str(idx1) if isinstance(idx1, str) else idx1
     pos0 = graph["node"][idx0]["pos"]
     pos1 = graph["node"][idx1]["pos"]
     return math.sqrt((pos0[0] - pos1[0]) ** 2 + (pos0[1] - pos1[1]) ** 2)

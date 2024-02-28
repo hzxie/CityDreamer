@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:45:23
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2024-01-09 18:39:44
+# @Last Modified at: 2024-02-28 16:26:23
 # @Email:  root@haozhexie.com
 
 import copy
@@ -16,7 +16,6 @@ import shutil
 
 import core.gancraft.test
 import losses.gan
-import losses.kl
 import losses.perceptual
 import models.gancraft
 import utils.average_meter

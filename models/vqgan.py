@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-05 20:09:04
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-12 20:58:57
+# @Last Modified at: 2024-02-28 16:36:13
 # @Email:  root@haozhexie.com
 # @Ref: https://github.com/CompVis/taming-transformers
 
@@ -15,10 +15,18 @@ import torch
 
 
 # Helper functions definition
-nonlinearity = lambda x: x * torch.sigmoid(x)
-normalize = lambda c_in: torch.nn.GroupNorm(
-    num_groups=32, num_channels=c_in, eps=1e-6, affine=True
-)
+# nonlinearity = lambda x: x * torch.sigmoid(x)
+# normalize = lambda c_in: torch.nn.GroupNorm(
+#     num_groups=32, num_channels=c_in, eps=1e-6, affine=True
+# )
+
+
+def nonlinearity(x):
+    return x * torch.sigmoid(x)
+
+
+def normalize(c_in):
+    return torch.nn.GroupNorm(num_groups=32, num_channels=c_in, eps=1e-6, affine=True)
 
 
 class VQAutoEncoder(torch.nn.Module):
@@ -270,8 +278,8 @@ class VectorQuantizer(torch.nn.Module):
 
     def forward(self, z, temp=None, rescale_logits=False, return_logits=False):
         assert temp is None or temp == 1.0, "Only for interface compatible with Gumbel"
-        assert rescale_logits == False, "Only for interface compatible with Gumbel"
-        assert return_logits == False, "Only for interface compatible with Gumbel"
+        assert not rescale_logits, "Only for interface compatible with Gumbel"
+        assert not return_logits, "Only for interface compatible with Gumbel"
         # reshape z -> (batch, height, width, channel) and flatten
         z = einops.rearrange(z, "b c h w -> b h w c").contiguous()
         z_flattened = z.view(-1, self.cfg.NETWORK.VQGAN.EMBED_DIM)
