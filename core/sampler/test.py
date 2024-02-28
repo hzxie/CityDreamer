@@ -4,12 +4,11 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-10 10:46:40
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-16 08:23:18
+# @Last Modified at: 2024-02-28 16:30:16
 # @Email:  root@haozhexie.com
 
 import logging
 import torch
-import torch.nn.functional as F
 
 import models.vqgan
 import models.sampler

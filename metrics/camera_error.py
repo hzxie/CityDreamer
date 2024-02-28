@@ -4,7 +4,7 @@
 # @Author: Zhaoxi Chen (@FrozenBurning)
 # @Date:   2023-08-13 15:02:56
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-08-15 19:37:25
+# @Last Modified at: 2024-02-28 16:30:59
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -103,7 +103,7 @@ def affine_registration(P, Q):
     (n, dim) = P.shape
     # Compute least squares
     p, res, rnk, s = scipy.linalg.lstsq(np.hstack((P, np.ones([n, 1]))), Q)
-    scaled_res = res**0.5 / Q.max(0)
+    # scaled_res = res**0.5 / Q.max(0)
     # Get translation
     t = p[-1].T
     # Get transform matrix
