@@ -4,17 +4,17 @@
 # @Author: Haozhe Xie
 # @Date:   2023-05-01 10:27:01
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-06-16 16:12:55
+# @Last Modified at: 2024-03-01 09:36:26
 # @Email:  root@haozhexie.com
 #
 # Quick Start
 # - conda create --name seem python=3.8
 # - conda activate seem
-# - git clone https://github.com/UX-Decoder/Segment-Everything-Everywhere-All-At-Once.git
-# - mv Segment-Everything-Everywhere-All-At-Once SEEM
-# - cd SEEM/demo_code
-# - pip install torch==1.12.0+cu113 torchvision==0.13.0+cu113 --extra-index-url https://download.pytorch.org/whl/cu113
-# - pip install -r requirements.txt
+# - git clone -b v1.0 https://github.com/UX-Decoder/Segment-Everything-Everywhere-All-At-Once.git SEEM
+# - cd SEEM
+# - sed -i "/torch/d" assets/requirements/requirements.txt
+# - pip install -r assets/requirements/requirements.txt
+# - pip install -r assets/requirements/requirements_custom.txt
 #
 # Important Note
 # - MAKE SURE THE SCRIPT IS RUNNING IN THE ``seem'' ENVIRONMENT.
@@ -40,21 +40,22 @@ from tqdm import tqdm
 
 def get_seem_model(seem_home, seem_cfg):
     arguments = importlib.import_module("utils.arguments")
-    base_model = importlib.import_module("xdecoder.BaseModel")
+    modeling = importlib.import_module("modeling")
+    base_model = importlib.import_module("modeling.BaseModel")
     constants = importlib.import_module("utils.constants")
     distributed = importlib.import_module("utils.distributed")
-    xdecoder = importlib.import_module("xdecoder")
-    opt = arguments.load_opt_from_config_files(os.path.join(seem_home, seem_cfg))
+    opt = arguments.load_opt_from_config_files([os.path.join(seem_home, seem_cfg)])
     opt = distributed.init_distributed(opt)
-    ckpt_file_path = os.path.join(seem_home, "seem_focalt_v2.pt")
+    ckpt_file_path = os.path.join(seem_home, "seem_focalt_v0.pt")
     if not os.path.exists(ckpt_file_path):
+        logging.info("Downloading the pretrained model to %s" % ckpt_file_path)
         urllib.request.urlretrieve(
-            "https://huggingface.co/xdecoder/SEEM/resolve/main/seem_focalt_v2.pt",
+            "https://huggingface.co/xdecoder/SEEM/resolve/main/seem_focalt_v0.pt",
             ckpt_file_path,
         )
 
     model = (
-        base_model.BaseModel(opt, xdecoder.build_model(opt))
+        base_model.BaseModel(opt, modeling.build_model(opt))
         .from_pretrained(ckpt_file_path)
         .eval()
         .cuda()
@@ -212,12 +213,12 @@ if __name__ == "__main__":
     parser.add_argument(
         "--seem_home",
         help="The path to the project dir of SEEM",
-        default=os.path.join(PROJECT_HOME, os.pardir, "SEEM", "demo_code"),
+        default=os.path.join(PROJECT_HOME, os.pardir, "SEEM"),
     )
     parser.add_argument(
         "--seem_cfg",
         help="The path to the config file of SEEM",
-        default=os.path.join("configs", "seem", "seem_focalt_lang.yaml"),
+        default=os.path.join("configs", "seem", "focalt_unicl_lang_demo.yaml"),
     )
     parser.add_argument("--ges_dir", default=os.path.join(PROJECT_HOME, "data", "ges"))
     parser.add_argument("--batch_size", default=16)
