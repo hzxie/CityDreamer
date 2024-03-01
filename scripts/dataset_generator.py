@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-03-31 15:04:25
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2023-07-15 19:12:45
+# @Last Modified at: 2024-03-01 10:59:27
 # @Email:  root@haozhexie.com
 
 import argparse
@@ -644,17 +644,17 @@ def main(
         os.makedirs(_osm_out_dir, exist_ok=True)
         # Rasterisation
         output_hf_file_path = os.path.join(_osm_out_dir, "hf.png")
-        output_ctr_file_path = os.path.join(_osm_out_dir, "ctr.png")
+        # output_ctr_file_path = os.path.join(_osm_out_dir, "ctr.png")
         output_seg_map_file_path = os.path.join(_osm_out_dir, "seg.png")
         metadata_file_path = os.path.join(_osm_out_dir, "metadata.json")
         if (
             os.path.exists(output_hf_file_path)
-            and os.path.exists(output_ctr_file_path)
+            # and os.path.exists(output_ctr_file_path)
             and os.path.exists(output_seg_map_file_path)
             and os.path.exists(metadata_file_path)
         ):
             height_field = np.array(Image.open(output_hf_file_path))
-            contours = np.array(Image.open(output_ctr_file_path))
+            # contours = np.array(Image.open(output_ctr_file_path))
             seg_map = np.array(Image.open(output_seg_map_file_path).convert("P"))
             with open(metadata_file_path) as f:
                 metadata = json.load(f)
@@ -665,13 +665,13 @@ def main(
                 zoom_level,
             )
             Image.fromarray(height_field).save(output_hf_file_path)
-            Image.fromarray(contours).save(output_ctr_file_path)
+            # Image.fromarray(contours).save(output_ctr_file_path)
             utils.helpers.get_seg_map(seg_map).save(output_seg_map_file_path)
             with open(metadata_file_path, "w") as f:
                 json.dump(metadata, f)
 
         # Generate building instance segmentation map and the corresponding metadata
-        ins_seg_map, building_stats = get_instance_seg_map(seg_map, contours)
+        ins_seg_map, building_stats = get_instance_seg_map(seg_map, contours=None)
         logging.info("%d building instances in %s" % (len(building_stats), basename))
         # Align images from Google Earth Studio
         logging.debug("Generating Google Earth segmentation maps ...")

@@ -4,7 +4,7 @@
 # @Author: Haozhe Xie
 # @Date:   2023-04-21 19:46:36
 # @Last Modified by: Haozhe Xie
-# @Last Modified at: 2024-01-09 18:48:07
+# @Last Modified at: 2024-03-01 15:29:19
 # @Email:  root@haozhexie.com
 
 import logging
@@ -81,8 +81,8 @@ def test(cfg, test_data_loader=None, gancraft=None):
                                 voxel_id[:, None, ..., 0, 0],
                                 torch.tensor(
                                     [
-                                        cfg.NETWORK.GAMCRAFT.FACADE_CLS_ID,
-                                        cfg.NETWORK.GAMCRAFT.ROOF_CLS_ID,
+                                        cfg.NETWORK.GANCRAFT.FACADE_CLS_ID,
+                                        cfg.NETWORK.GANCRAFT.ROOF_CLS_ID,
                                     ],
                                     device=gancraft.device,
                                 ),

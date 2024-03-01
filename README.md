@@ -7,19 +7,23 @@
 
 S-Lab, Nanyang Technological University
 
+[![Codebeat](https://codebeat.co/badges/63b14308-509d-42b1-a9c3-dc86e9d6ca2f)](https://codebeat.co/projects/github-com-hzxie-citydreamer-master)
 ![Counter](https://api.infinitescript.com/badgen/count?name=hzxie/CityDreamer)
 [![arXiv](https://img.shields.io/badge/arXiv-2309.00610-b31b1b.svg)](https://arxiv.org/abs/2309.00610)
+[![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97-Hugging%20Face-orange)](https://huggingface.co/spaces/hzxie/city-dreamer)
 [![YouTube](https://img.shields.io/badge/Spotlight%20Video-%23FF0000.svg?logo=YouTube&logoColor=white)](https://youtu.be/te4zinLTYz0)
 
 ![Teaser](https://www.infinitescript.com/projects/CityDreamer/CityDreamer-Teaser.jpg)
 
-## Update🔥
+## Changelog 🔥
 
-- [2023/03/28] The training and testing code is released.
-- [2023/02/27] The OSM and GoogleEarth datasets is released.
+- [2024/06/10] The training code is released.
+- [2024/03/28] The testing code is released.
+- [2024/03/03] The hugging face demo is available.
+- [2024/02/27] The OSM and GoogleEarth datasets is released.
 - [2023/08/15] The repo is created.
 
-## Cite this work📝
+## Cite this work 📝
 
 ```
 @inproceedings{xie2024citydreamer,
@@ -42,15 +46,15 @@ The proposed OSM and GoogleEarth datasets  are available as below.
 
 The pretrained models are available as below.
 
-- [Unbounded Layout Generator](https://gateway.infinitescript.com/s/LayoutGen.pth)
-- [Background Stuff Generator](https://gateway.infinitescript.com/s/CityDreamer-Bgnd.pth)
-- [Building Instance Generator](https://gateway.infinitescript.com/s/CityDreamer-Fgnd.pth)
+- [Unbounded Layout Generator](https://gateway.infinitescript.com/?f=LayoutGen.pth)
+- [Background Stuff Generator](https://gateway.infinitescript.com/?f=CityDreamer-Bgnd.pth)
+- [Building Instance Generator](https://gateway.infinitescript.com/?f=CityDreamer-Fgnd.pth)
 
-## Installation📥
+## Installation 📥
 
 Assume that you have installed [CUDA](https://developer.nvidia.com/cuda-downloads) and [PyTorch](https://pytorch.org) in your Python (or Anaconda) environment.  
 
-The CityDreamer source code is tested in PyTorch 1.13.1 with CUDA 11.7. You can use the following command to install PyTorch with CUDA 11.7.
+The CityDreamer source code is tested in PyTorch 1.13.1 with CUDA 11.7 in Python 3.8. You can use the following command to install PyTorch with CUDA 11.7.
 
 ```bash
 pip install torch==1.13.1+cu117 torchvision==0.14.1+cu117 --extra-index-url https://download.pytorch.org/whl/cu117
@@ -76,7 +80,7 @@ do
 done
 ```
 
-## Inference🚩
+## Inference 🚩
 
 Both the iterative demo and command line interface (CLI) by default load the pretrained models for Unbounded Layout Generator, Background Stuff Generator, and Building Instance Generator from `output/sampler.pth`, `output/gancraft-bg.pth`, and `output/gancraft-fg.pth`, respectively. You have the option to specify a different location using runtime arguments.
 
@@ -164,7 +168,7 @@ torchrun --nnodes=1 --nproc_per_node=4 --standalone run.py -n VQGAN -e VQGAN-Exp
 
 # 0x02. Train Sampler with 2 GPUs
 torchrun --nnodes=1 --nproc_per_node=2 --standalone run.py -n Sampler -e Sampler-Exp\
-         -p /output/checkpoints/VQGAN-Exp/ckpt-last.pth
+         -p output/checkpoints/VQGAN-Exp/ckpt-last.pth
 ```
 
 ### Background Stuff Generator Training
