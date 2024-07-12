@@ -22,10 +22,10 @@ setup(
                 "bindings.cpp",
             ],
             extra_compile_args={
-                "cxx": ["-O3", "-std=c++14"],
+                "cxx": ["-O3", "-std=c++17"],
                 "nvcc": [
                     "-O3",
-                    "-std=c++14",
+                    "-std=c++17",
                     "-U__CUDA_NO_HALF_OPERATORS__",
                     "-U__CUDA_NO_HALF_CONVERSIONS__",
                     "-U__CUDA_NO_HALF2_OPERATORS__",

@@ -9,14 +9,15 @@ cxx_args = ["-fopenmp"]
 nvcc_args = []
 
 setup(
-    name="voxrender",
+    name="voxlib",
     version="1.0.0",
     ext_modules=[
         CUDAExtension(
             "voxlib",
             [
-                "voxlib.cpp",
+                "bindings.cpp",
                 "ray_voxel_intersection.cu",
+                "positional_encoding_kernel.cu",
             ],
             extra_compile_args={"cxx": cxx_args, "nvcc": nvcc_args},
         )
