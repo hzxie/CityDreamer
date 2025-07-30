@@ -6,7 +6,8 @@
 
 S-Lab, Nanyang Technological University
 
-[![Codebeat](https://codebeat.co/badges/63b14308-509d-42b1-a9c3-dc86e9d6ca2f)](https://codebeat.co/projects/github-com-hzxie-citydreamer-master)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=hzxie_CityDreamer&metric=alert_status)](https://sonarcloud.io/summary/new_code?id=hzxie_CityDreamer)
+[![codefactor badge](https://www.codefactor.io/repository/github/hzxie/CityDreamer/badge)](https://www.codefactor.io/repository/github/hzxie/CityDreamer)
 ![Counter](https://api.infinitescript.com/badgen/count?name=hzxie/CityDreamer)
 [![arXiv](https://img.shields.io/badge/arXiv-2309.00610-b31b1b.svg)](https://arxiv.org/abs/2309.00610)
 [![HuggingFace](https://img.shields.io/badge/%F0%9F%A4%97-Hugging%20Face-orange)](https://huggingface.co/spaces/hzxie/city-dreamer)
