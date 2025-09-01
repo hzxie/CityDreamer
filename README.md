@@ -17,6 +17,7 @@ S-Lab, Nanyang Technological University
 
 ## Changelog 🔥
 
+- [2025/09/01] Follow-up work [CityDreamer4D](https://arxiv.org/abs/2501.08983) is accepted to TPAMI, with code [here](https://github.com/hzxie/CityDreamer4D).
 - [2024/06/10] The training code is released.
 - [2024/03/28] The testing code is released.
 - [2024/03/03] The hugging face demo is available.
