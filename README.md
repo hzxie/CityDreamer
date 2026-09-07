@@ -42,8 +42,8 @@ S-Lab, Nanyang Technological University
 
 The proposed OSM and GoogleEarth datasets  are available as below.
 
-- [OSM](https://gateway.infinitescript.com/s/OSM)
-- [GoogleEarth](https://gateway.infinitescript.com/s/GoogleEarth)
+- [OSM](https://gateway.infinitescript.com/?f=OSM)
+- [GoogleEarth](https://gateway.infinitescript.com/?f=GoogleEarth)
 
 The pretrained models are available as below.
 
@@ -122,7 +122,7 @@ The generated video is located at `output/rendering.mp4`.
 
 ### Dataset Preparation
 
-By default, all scripts load the [OSM](https://gateway.infinitescript.com/s/OSM) and [GoogleEarth](https://gateway.infinitescript.com/s/GoogleEarth) datasets from `./data/osm` and `./data/ges`, respectively. You have the option to specify a different location using runtime arguments.
+By default, all scripts load the [OSM](https://gateway.infinitescript.com/?f=OSM) and [GoogleEarth](https://gateway.infinitescript.com/?f=GoogleEarth) datasets from `./data/osm` and `./data/ges`, respectively. You have the option to specify a different location using runtime arguments.
 
 ```
 ├── ...
